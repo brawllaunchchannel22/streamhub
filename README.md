@@ -1,6 +1,6 @@
 # StreamHub 📺
 
-StreamHub ist ein moderner, performanter und optisch ansprechender Mediathek-Client sowie IPTV-Player für deutsche öffentlich-rechtliche Fernsehsender. Das Programm läuft als Desktop-Applikation unter Linux und bietet eine übersichtliche Oberfläche, um Sendungen zu durchstöbern, Live-Streams anzusehen oder lokale Videodateien zu verwalten.
+StreamHub ist ein moderner, performanter und optisch ansprechender Mediathek-Client sowie IPTV-Player für deutsche öffentlich-rechtliche Fernsehsender. Das Programm läuft als Desktop-Applikation unter Linux + Android und bietet eine übersichtliche Oberfläche, um Sendungen zu durchstöbern, Live-Streams anzusehen oder lokale Videodateien zu verwalten.
 
 ![Version](https://img.shields.io/badge/Version-3.0.0-blue.svg?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)
