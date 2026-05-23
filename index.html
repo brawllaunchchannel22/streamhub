@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamHub - Deutsche Mediatheken</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-left">
+                <button id="hamburgerMenu" class="icon-btn hamburger-btn">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="logo">
+                    <i class="fas fa-tv"></i>
+                    <span>Stream<strong>Hub</strong></span>
+                </div>
+                <div class="nav-categories">
+                    <a href="#" data-category="home" class="active">Start</a>
+                    <a href="#" data-category="live" data-page="live">Live TV</a>
+                    <a href="#" data-category="Dokumentation">Dokus</a>
+                    <a href="#" data-category="Tatort">Krimi</a>
+                    <a href="#" data-category="Spielfilm">Filme</a>
+                    <a href="#" data-category="Nachrichten">News</a>
+                    <a href="#" data-category="Sport">Sport</a>
+                    <a href="#" data-category="Kinder">Kinder</a>
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="searchInput" placeholder="Suche nach Sendungen, Themen...">
+                </div>
+                <button id="filterToggle" class="icon-btn" title="Filter">
+                    <i class="fas fa-sliders-h"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Filter Sidebar -->
+    <div id="filterSidebar" class="filter-sidebar">
+        <div class="filter-header">
+            <h3><i class="fas fa-filter"></i> Filter</h3>
+            <button id="closeFilter" class="close-btn">&times;</button>
+        </div>
+        <div class="filter-content">
+            <div class="filter-section">
+                <label>Sender</label>
+                <select id="channelFilter">
+                    <option value="">Alle Sender</option>
+                    <option value="ARD">ARD</option>
+                    <option value="ZDF">ZDF</option>
+                    <option value="3sat">3sat</option>
+                    <option value="ARTE">ARTE</option>
+                    <option value="BR">BR</option>
+                    <option value="HR">HR</option>
+                    <option value="MDR">MDR</option>
+                    <option value="NDR">NDR</option>
+                    <option value="RBB">RBB</option>
+                    <option value="SR">SR</option>
+                    <option value="SWR">SWR</option>
+                    <option value="WDR">WDR</option>
+                </select>
+            </div>
+            <div class="filter-section">
+                <label>Genre</label>
+                <select id="genreFilter">
+                    <option value="">Alle Genres</option>
+                    <option value="Dokumentation">Dokumentation</option>
+                    <option value="Film">Spielfilm</option>
+                    <option value="Serie">Serie</option>
+                    <option value="Krimi">Krimi</option>
+                    <option value="Tatort">Tatort</option>
+                    <option value="Nachrichten">Nachrichten</option>
+                    <option value="Sport">Sport</option>
+                    <option value="Unterhaltung">Unterhaltung</option>
+                    <option value="Kinder">Kinder</option>
+                    <option value="Kultur">Kultur</option>
+                    <option value="Musik">Musik</option>
+                    <option value="Comedy">Comedy</option>
+                </select>
+            </div>
+            <div class="filter-section">
+                <label>Dauer</label>
+                <select id="durationFilter">
+                    <option value="0">Alle Längen</option>
+                    <option value="5">Über 5 Min</option>
+                    <option value="15">Über 15 Min</option>
+                    <option value="30">Über 30 Min</option>
+                    <option value="60">Über 1 Stunde</option>
+                    <option value="90">Über 1,5 Stunden</option>
+                </select>
+            </div>
+            <div class="filter-section">
+                <label>Sortierung</label>
+                <select id="sortFilter">
+                    <option value="date">Neueste zuerst</option>
+                    <option value="duration">Nach Länge</option>
+                    <option value="title">Alphabetisch</option>
+                    <option value="episode">Nach Episoden</option>
+                </select>
+            </div>
+            <div class="filter-section">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="realThumbnailsToggle">
+                    <span>Echte Thumbnails laden (langsamer)</span>
+                </label>
+            </div>
+            <button id="applyFilter" class="btn-primary">Filter anwenden</button>
+            <button id="resetFilter" class="btn-secondary">Zurücksetzen</button>
+        </div>
+    </div>
+
+    <!-- Hamburger Menu -->
+    <div id="hamburgerSidebar" class="hamburger-sidebar">
+        <div class="filter-header">
+            <h3><i class="fas fa-bars"></i> Menü</h3>
+            <button id="closeHamburger" class="close-btn">&times;</button>
+        </div>
+        <div class="hamburger-content">
+            <a href="#" class="hamburger-item" data-page="home">
+                <i class="fas fa-home"></i>
+                <span>Startseite</span>
+            </a>
+            <a href="#" class="hamburger-item" data-page="live">
+                <i class="fas fa-broadcast-tower"></i>
+                <span>Live TV</span>
+            </a>
+            <a href="#" class="hamburger-item" data-page="local">
+                <i class="fas fa-folder"></i>
+                <span>Lokale Videos</span>
+            </a>
+            <a href="#" class="hamburger-item" data-page="history">
+                <i class="fas fa-history"></i>
+                <span>Verlauf</span>
+            </a>
+            <a href="#" class="hamburger-item" data-page="settings">
+                <i class="fas fa-cog"></i>
+                <span>Einstellungen</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        
+        <!-- Recently Watched Section (Compact on Home) -->
+        <section id="recentlyWatched" class="content-section recent-section" style="display: none;">
+            <div class="section-header">
+                <h2><i class="fas fa-history"></i> Zuletzt angesehen</h2>
+                <div class="recent-controls">
+                    <button id="showAllHistory" class="text-btn">Alle anzeigen</button>
+                </div>
+            </div>
+            <div class="video-grid recent-grid recent-grid-compact" id="recentGrid"></div>
+        </section>
+
+        <!-- Full History Page -->
+        <section id="historyPage" class="content-section" style="display: none;">
+            <div class="section-header">
+                <h2><i class="fas fa-history"></i> Verlauf</h2>
+                <div class="recent-controls">
+                    <input type="text" id="searchHistory" placeholder="Verlauf durchsuchen..." class="search-history">
+                    <button id="clearHistory" class="text-btn">Verlauf löschen</button>
+                </div>
+            </div>
+            <div class="video-grid" id="historyGrid"></div>
+        </section>
+
+        <!-- Live TV Page -->
+        <section id="livePage" class="content-section" style="display: none;">
+            <div class="section-header">
+                <h2><i class="fas fa-broadcast-tower"></i> Live TV</h2>
+            </div>
+            <div class="live-channels-grid" id="liveChannelsGrid"></div>
+        </section>
+
+        <!-- Local Videos Page -->
+        <section id="localPage" class="content-section" style="display: none;">
+            <div class="section-header">
+                <h2><i class="fas fa-folder"></i> Lokale Videos</h2>
+                <div class="recent-controls">
+                    <button id="addLocalFolder" class="btn-primary">
+                        <i class="fas fa-folder-plus"></i> Ordner hinzufügen
+                    </button>
+                    <button id="scanLocalFolders" class="btn-secondary">
+                        <i class="fas fa-sync"></i> Neu scannen
+                    </button>
+                </div>
+            </div>
+            <div id="localFoldersContainer">
+                <div class="empty-state">
+                    <i class="fas fa-folder-open"></i>
+                    <h3>Keine lokalen Ordner</h3>
+                    <p>Füge einen Ordner hinzu, um lokale Videos anzuzeigen</p>
+                </div>
+            </div>
+            <div class="video-grid" id="localFoldersGrid"></div>
+        </section>
+
+        <!-- Local Folder Detail Page -->
+        <section id="localFolderDetailPage" class="content-section" style="display: none;">
+            <div class="section-header">
+                <button id="backToLocalFolders" class="btn-back">
+                    <i class="fas fa-arrow-left"></i> Zurück
+                </button>
+                <h2 id="folderDetailTitle"><i class="fas fa-folder-open"></i> Ordner</h2>
+                <div class="recent-controls">
+                    <select id="localSortBy" class="setting-select">
+                        <option value="name">Nach Name</option>
+                        <option value="size">Nach Größe</option>
+                        <option value="date">Nach Datum</option>
+                    </select>
+                </div>
+            </div>
+            <div class="video-grid" id="folderDetailGrid"></div>
+        </section>
+
+        <!-- Series Detail Page -->
+        <section id="seriesDetailPage" class="content-section" style="display: none;">
+            <div class="section-header">
+                <button id="backFromSeries" class="btn-back">
+                    <i class="fas fa-arrow-left"></i> Zurück
+                </button>
+                <h2 id="seriesDetailTitle"><i class="fas fa-tv"></i> Serie</h2>
+            </div>
+            <div id="seriesDetailContent">
+                <div id="seriesInfo" class="series-info-container"></div>
+                <div class="video-grid" id="seriesEpisodesGrid"></div>
+            </div>
+        </section>
+
+        <!-- Settings Page -->
+        <section id="settingsPage" class="content-section" style="display: none;">
+            <div class="section-header">
+                <h2><i class="fas fa-cog"></i> Einstellungen</h2>
+            </div>
+            <div class="settings-container">
+                <div class="settings-section">
+                    <h3>Darstellung</h3>
+                    <div class="setting-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="settingRealThumbnails">
+                            <span>Echte Thumbnails laden (langsamer, aber genauer)</span>
+                        </label>
+                        <p class="setting-description">Lädt echte Thumbnails von den Sendern statt generierter Vorschaubilder</p>
+                    </div>
+                    <div class="setting-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="settingAutoplay" checked>
+                            <span>Videos automatisch abspielen</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <h3>Lokale Videos</h3>
+                    <div class="setting-item">
+                        <label>Standard-Videoplayer</label>
+                        <select id="settingDefaultPlayer" class="setting-select">
+                            <option value="internal">Integrierter Player</option>
+                            <option value="external">Externer Player (VLC, etc.)</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <button id="manageLocalFolders" class="btn-secondary">
+                            <i class="fas fa-folder-open"></i> Lokale Ordner verwalten
+                        </button>
+                    </div>
+                </div>
+                                <div class="settings-section">
+                    <h3><i class="fas fa-film" style="color:#6366f1;margin-right:.5rem;"></i>TMDB API (Serien-Poster)</h3>
+                    <div class="setting-item">
+                        <label>API Key</label>
+                        <div class="tmdb-key-row">
+                            <input type="password" id="settingTmdbKey" class="setting-input" placeholder="Key von themoviedb.org..." autocomplete="off">
+                            <button id="saveTmdbKey" class="btn-primary-inline"><i class="fas fa-save"></i> Speichern</button>
+                        </div>
+                        <p class="setting-description">Kostenlosen Key auf <strong>themoviedb.org/settings/api</strong> holen &mdash; aktiviert Serien-Poster.<br>Ohne Key laufen alle anderen Features trotzdem normal.</p>
+                    </div>
+                </div>
+<div class="settings-section">
+                    <h3>Cache & Speicher</h3>
+                    <div class="setting-item">
+                        <button id="clearCache" class="btn-secondary">
+                            <i class="fas fa-trash"></i> Cache leeren
+                        </button>
+                        <p class="setting-description">Löscht temporäre Dateien und Thumbnails</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Video Section -->
+        <section id="mainVideoSection" class="content-section">
+            <div class="section-header">
+                <h2 id="sectionTitle"><i class="fas fa-fire"></i> Aktuelle Highlights</h2>
+                <div class="results-info">
+                    <span id="resultsCount"></span>
+                </div>
+            </div>
+            
+            <div id="loadingState" class="loading-state">
+                <div class="spinner"></div>
+                <p>Lade Inhalte...</p>
+            </div>
+            
+            <div id="emptyState" class="empty-state" style="display: none;">
+                <i class="fas fa-search"></i>
+                <h3>Keine Ergebnisse gefunden</h3>
+                <p>Versuche andere Suchbegriffe oder Filter</p>
+            </div>
+            
+            <div class="video-grid" id="videoGrid"></div>
+            
+            <div class="load-more-container" style="display: none;">
+                <button id="loadMore" class="btn-secondary">
+                    <i class="fas fa-chevron-down"></i> Mehr laden
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-section">
+                <h4>StreamHub</h4>
+                <p>Deine zentrale Plattform für deutsche öffentlich-rechtliche Inhalte.</p>
+            </div>
+            <div class="footer-section">
+                <h4>Links</h4>
+                <ul>
+                    <li><a href="#" id="aboutLink">Über uns</a></li>
+                    <li><a href="#" id="faqLink">FAQ</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h4>Rechtliches</h4>
+                <ul>
+                    <li><a href="#" id="imprintLink">Impressum</a></li>
+                    <li><a href="#" id="privacyLink">Datenschutz</a></li>
+                    <li><a href="#" id="termsLink">Nutzungsbedingungen</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h4>Hinweis</h4>
+                <p class="disclaimer">Alle Inhalte stammen von den Mediatheken der öffentlich-rechtlichen Sender. Diese App ist eine inoffizielle Drittanbieter-Anwendung.</p>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2026 StreamHub. Alle Rechte vorbehalten.</p>
+        </div>
+    </footer>
+
+    <!-- Info Modal -->
+    <div id="infoModal" class="info-modal">
+        <div class="info-modal-content">
+            <button class="modal-close" id="closeInfoModal">
+                <i class="fas fa-times"></i>
+            </button>
+            <div id="infoModalBody"></div>
+        </div>
+    </div>
+
+    <!-- Video Modal -->
+    <div id="videoModal" class="modal">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <button class="modal-close" id="closeModal">
+                <i class="fas fa-times"></i>
+            </button>
+            
+            <div class="video-player-container">
+                <video id="videoPlayer" controls>
+                    <track id="subtitleTrack" kind="subtitles" srclang="de" label="Deutsch">
+                </video>
+            </div>
+            
+            <div class="video-details">
+                <div class="video-meta">
+                    <h2 id="videoTitle"></h2>
+                    <div class="video-info-row">
+                        <span id="videoChannel" class="channel-badge"></span>
+                        <span id="videoDuration"></span>
+                        <span id="videoDate"></span>
+                    </div>
+                    <p id="videoDescription"></p>
+                </div>
+                
+                <div class="video-actions">
+                    <div class="quality-selector-container">
+                        <label for="qualitySelector">
+                            <i class="fas fa-cog"></i> Qualität:
+                        </label>
+                        <select id="qualitySelector" class="quality-selector"></select>
+                    </div>
+                    <div class="quality-selector-container" id="subtitleSelectorContainer" style="display: none;">
+                        <label for="subtitleSelector">
+                            <i class="fas fa-closed-captioning"></i> Untertitel:
+                        </label>
+                        <select id="subtitleSelector" class="quality-selector"></select>
+                    </div>
+                    <button id="fullscreenBtn" class="action-btn">
+                        <i class="fas fa-expand"></i> Vollbild
+                    </button>
+                    <button id="downloadBtn" class="action-btn">
+                        <i class="fas fa-download"></i> Download
+                    </button>
+                    <button id="shareBtn" class="action-btn">
+                        <i class="fas fa-share"></i> Teilen
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

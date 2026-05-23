@@ -1,0 +1,2506 @@
+// StreamHub v2.4.0 - SIMPLE & STABLE VERSION
+console.log('StreamHub starting...');
+
+// API Configuration
+const API_URL = 'https://mediathekviewweb.de/api/query';
+
+// DOM Elements - Get them safely
+let searchInput, videoGrid, loadingState, emptyState, sectionTitle, resultsCount, loadMore;
+let videoModal, videoPlayer, closeModal, hamburgerMenu, closeHamburger, hamburgerSidebar;
+let filterToggle, filterSidebar, closeFilter, applyFilter, resetFilter;
+let recentlyWatched, recentGrid, clearHistory, showAllHistory;
+let hlsInstance = null;
+
+// State
+let currentResults = [];
+let originalResults = [];
+let displayedResults = [];
+let currentOffset = 0;
+const resultsPerPage = 20;
+let thumbnailCache = {};
+let currentPage = 'home';
+let currentQuery = '';
+let currentCategory = '';
+let useRealThumbnails = false;
+let localFolders = [];
+let localVideos = [];
+
+// Sender Colors
+const senderColors = {
+    'ARD': ['#001d8f', '#0041c7'],
+    'ZDF': ['#ff6600', '#ff8c42'],
+    '3sat': ['#00877d', '#00bfaf'],
+    'ARTE': ['#ff7f00', '#ffb84d'],
+    'BR': ['#c50e1f', '#e94b3c'],
+    'HR': ['#e3000f', '#ff4d5a'],
+    'MDR': ['#003e7e', '#0066cc'],
+    'NDR': ['#0e4194', '#1a5bb8'],
+    'RBB': ['#e30613', '#ff3a47'],
+    'SR': ['#00549f', '#0077cc'],
+    'SWR': ['#c4122f', '#e63946'],
+    'WDR': ['#1f3d7a', '#2d5ba8'],
+    'DEFAULT': ['#374151', '#4b5563']
+};
+
+// Wait for DOM then initialize
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM ready, initializing...');
+    init();
+});
+
+function init() {
+    try {
+        // Get DOM elements
+        searchInput = document.getElementById('searchInput');
+        videoGrid = document.getElementById('videoGrid');
+        loadingState = document.getElementById('loadingState');
+        emptyState = document.getElementById('emptyState');
+        sectionTitle = document.getElementById('sectionTitle');
+        resultsCount = document.getElementById('resultsCount');
+        loadMore = document.getElementById('loadMore');
+        videoModal = document.getElementById('videoModal');
+        videoPlayer = document.getElementById('videoPlayer');
+        closeModal = document.getElementById('closeModal');
+        hamburgerMenu = document.getElementById('hamburgerMenu');
+        closeHamburger = document.getElementById('closeHamburger');
+        hamburgerSidebar = document.getElementById('hamburgerSidebar');
+        filterToggle = document.getElementById('filterToggle');
+        filterSidebar = document.getElementById('filterSidebar');
+        closeFilter = document.getElementById('closeFilter');
+        applyFilter = document.getElementById('applyFilter');
+        resetFilter = document.getElementById('resetFilter');
+        recentlyWatched = document.getElementById('recentlyWatched');
+        recentGrid = document.getElementById('recentGrid');
+        clearHistory = document.getElementById('clearHistory');
+        showAllHistory = document.getElementById('showAllHistory');
+        
+        console.log('DOM elements loaded');
+        
+        // Load settings and data
+        console.log('Loading settings...');
+        loadSettings();
+        loadLocalFolders();
+        
+        // Attach event listeners
+        attachEventListeners();
+        
+        // Load recently watched
+        loadRecentlyWatched();
+        
+        // Load default content
+        console.log('Loading default content...');
+        loadDefaultContent();
+        
+    } catch (error) {
+        console.error('Init error:', error);
+    }
+}
+
+function attachEventListeners() {
+    // Search
+    if (searchInput) {
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && searchInput.value.trim()) {
+                performSearch(searchInput.value.trim());
+            }
+        });
+    }
+    
+    // Navigation categories
+    document.querySelectorAll('.nav-categories a').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            document.querySelectorAll('.nav-categories a').forEach(l => l.classList.remove('active'));
+            e.target.classList.add('active');
+            
+            const category = e.target.dataset.category;
+            const page = e.target.dataset.page;
+            
+            console.log('Nav clicked:', { category, page });
+            
+            // Clear search input when clicking on navigation tabs
+            if (searchInput) {
+                searchInput.value = '';
+            }
+            
+            if (page === 'live') {
+                navigateToPage('live');
+            } else if (category === 'home') {
+                navigateToPage('home');
+            } else {
+                // Category search
+                const mainVideoSection = document.getElementById('mainVideoSection');
+                const livePage = document.getElementById('livePage');
+                const localPage = document.getElementById('localPage');
+                const settingsPage = document.getElementById('settingsPage');
+                const historyPage = document.getElementById('historyPage');
+                const recentlyWatched = document.getElementById('recentlyWatched');
+                
+                if (mainVideoSection) mainVideoSection.style.display = 'block';
+                if (livePage) livePage.style.display = 'none';
+                if (localPage) localPage.style.display = 'none';
+                if (settingsPage) settingsPage.style.display = 'none';
+                if (historyPage) historyPage.style.display = 'none';
+                if (recentlyWatched) recentlyWatched.style.display = 'none';
+                
+                performSearch(category);
+            }
+        });
+    });
+    
+    // Filter
+    if (filterToggle) {
+        filterToggle.addEventListener('click', () => {
+            if (filterSidebar) filterSidebar.classList.add('active');
+        });
+    }
+    
+    if (closeFilter) {
+        closeFilter.addEventListener('click', () => {
+            if (filterSidebar) filterSidebar.classList.remove('active');
+        });
+    }
+    
+    if (applyFilter) {
+        applyFilter.addEventListener('click', () => {
+            applyFilters();
+            if (filterSidebar) filterSidebar.classList.remove('active');
+        });
+    }
+    
+    if (resetFilter) {
+        resetFilter.addEventListener('click', () => {
+            console.log('Resetting filters...');
+            document.getElementById('channelFilter').value = '';
+            const genreFilter = document.getElementById('genreFilter');
+            if (genreFilter) genreFilter.value = '';
+            document.getElementById('durationFilter').value = '0';
+            document.getElementById('sortFilter').value = 'date';
+            applyFilters();
+        });
+    }
+    
+    // Load More
+    if (loadMore) {
+        loadMore.addEventListener('click', () => {
+            displayMoreResults();
+        });
+    }
+    
+    // Hamburger menu
+    if (hamburgerMenu) {
+        hamburgerMenu.addEventListener('click', () => {
+            if (hamburgerSidebar) hamburgerSidebar.classList.add('active');
+        });
+    }
+    
+    if (closeHamburger) {
+        closeHamburger.addEventListener('click', () => {
+            if (hamburgerSidebar) hamburgerSidebar.classList.remove('active');
+        });
+    }
+    
+    // Hamburger navigation
+    document.querySelectorAll('.hamburger-item[data-page]').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            const page = e.currentTarget.dataset.page;
+            navigateToPage(page);
+            if (hamburgerSidebar) hamburgerSidebar.classList.remove('active');
+        });
+    });
+    
+    // Recently watched
+    if (showAllHistory) {
+        showAllHistory.addEventListener('click', () => {
+            navigateToPage('history');
+        });
+    }
+    
+    if (clearHistory) {
+        clearHistory.addEventListener('click', () => {
+            if (confirm('Verlauf wirklich löschen?')) {
+                localStorage.removeItem('recentlyWatched');
+                if (recentlyWatched) recentlyWatched.style.display = 'none';
+                const historyPage = document.getElementById('historyPage');
+                const historyGrid = document.getElementById('historyGrid');
+                if (historyPage) historyPage.style.display = 'none';
+                if (historyGrid) historyGrid.innerHTML = '';
+            }
+        });
+    }
+    
+    // Search history
+    const searchHistory = document.getElementById('searchHistory');
+    if (searchHistory) {
+        searchHistory.addEventListener('input', (e) => {
+            filterHistoryPage(e.target.value);
+        });
+    }
+    
+    // Video modal
+    if (closeModal) {
+        closeModal.addEventListener('click', closeVideoModal);
+    }
+    
+    if (videoModal) {
+        const backdrop = videoModal.querySelector('.modal-backdrop');
+        if (backdrop) {
+            backdrop.addEventListener('click', closeVideoModal);
+        }
+    }
+    
+    // Video controls
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    if (fullscreenBtn) {
+        fullscreenBtn.addEventListener('click', () => {
+            if (videoPlayer && videoPlayer.requestFullscreen) {
+                videoPlayer.requestFullscreen();
+            }
+        });
+    }
+    
+    const downloadBtn = document.getElementById('downloadBtn');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', async () => {
+            const url = videoPlayer.src;
+            const title = document.getElementById('videoTitle')?.textContent || 'video';
+            
+            if (!url) {
+                alert('Keine Video-URL verfügbar');
+                return;
+            }
+            
+            // Use IPC if available
+            if (typeof require !== 'undefined') {
+                try {
+                    const { ipcRenderer } = require('electron');
+                    const result = await ipcRenderer.invoke('download-video', url, title);
+                    
+                    if (result.success) {
+                        alert(`Video gespeichert:\n${result.path}`);
+                    } else {
+                        alert(`Download fehlgeschlagen: ${result.message}`);
+                    }
+                } catch (err) {
+                    window.open(url, '_blank');
+                }
+            } else {
+                window.open(url, '_blank');
+            }
+        });
+    }
+    
+    // Share button
+    const shareBtn = document.getElementById('shareBtn');
+    if (shareBtn) {
+        shareBtn.addEventListener('click', shareVideo);
+    }
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (videoModal && videoModal.classList.contains('active')) {
+                closeVideoModal();
+            }
+            if (hamburgerSidebar && hamburgerSidebar.classList.contains('active')) {
+                hamburgerSidebar.classList.remove('active');
+            }
+            if (filterSidebar && filterSidebar.classList.contains('active')) {
+                filterSidebar.classList.remove('active');
+            }
+            const infoModal = document.getElementById('infoModal');
+            if (infoModal && infoModal.classList.contains('active')) {
+                infoModal.classList.remove('active');
+            }
+        }
+    });
+    
+    // Footer links
+    const aboutLink = document.getElementById('aboutLink');
+    const faqLink = document.getElementById('faqLink');
+    const imprintLink = document.getElementById('imprintLink');
+    const privacyLink = document.getElementById('privacyLink');
+    const termsLink = document.getElementById('termsLink');
+    
+    if (aboutLink) aboutLink.addEventListener('click', (e) => { e.preventDefault(); showInfoModal('about'); });
+    if (faqLink) faqLink.addEventListener('click', (e) => { e.preventDefault(); showInfoModal('faq'); });
+    if (imprintLink) imprintLink.addEventListener('click', (e) => { e.preventDefault(); showInfoModal('imprint'); });
+    if (privacyLink) privacyLink.addEventListener('click', (e) => { e.preventDefault(); showInfoModal('privacy'); });
+    if (termsLink) termsLink.addEventListener('click', (e) => { e.preventDefault(); showInfoModal('terms'); });
+    
+    const closeInfoModal = document.getElementById('closeInfoModal');
+    if (closeInfoModal) {
+        closeInfoModal.addEventListener('click', () => {
+            const infoModal = document.getElementById('infoModal');
+            if (infoModal) infoModal.classList.remove('active');
+        });
+    }
+    
+    // Local videos buttons
+    const addLocalFolder = document.getElementById('addLocalFolder');
+    if (addLocalFolder) {
+        addLocalFolder.addEventListener('click', () => {
+            console.log('Add local folder clicked');
+            addLocalFolderDialog();
+        });
+    }
+    
+    const scanLocalFolders = document.getElementById('scanLocalFolders');
+    if (scanLocalFolders) {
+        scanLocalFolders.addEventListener('click', () => {
+            console.log('Scan local folders clicked');
+            scanLocalVideos();
+        });
+    }
+    
+    const manageLocalFolders = document.getElementById('manageLocalFolders');
+    if (manageLocalFolders) {
+        manageLocalFolders.addEventListener('click', () => {
+            console.log('Manage local folders clicked');
+            navigateToPage('local');
+        });
+    }
+    
+    // Settings
+    const settingRealThumbnails = document.getElementById('settingRealThumbnails');
+    if (settingRealThumbnails) {
+        settingRealThumbnails.addEventListener('change', (e) => {
+            console.log('Settings: real thumbnails =', e.target.checked);
+            useRealThumbnails = e.target.checked;
+            saveSettings();
+            const realThumbnailsToggle = document.getElementById('realThumbnailsToggle');
+            if (realThumbnailsToggle) realThumbnailsToggle.checked = useRealThumbnails;
+        });
+    }
+    
+    const realThumbnailsToggle = document.getElementById('realThumbnailsToggle');
+    if (realThumbnailsToggle) {
+        realThumbnailsToggle.addEventListener('change', (e) => {
+            console.log('Filter: real thumbnails =', e.target.checked);
+            useRealThumbnails = e.target.checked;
+            saveSettings();
+            const settingRealThumbnails = document.getElementById('settingRealThumbnails');
+            if (settingRealThumbnails) settingRealThumbnails.checked = useRealThumbnails;
+        });
+    }
+    
+    const clearCache = document.getElementById('clearCache');
+    if (clearCache) {
+        clearCache.addEventListener('click', () => {
+            console.log('Clear cache clicked');
+            if (confirm('Cache wirklich leeren?')) {
+                thumbnailCache = {};
+                localStorage.removeItem('thumbnailCache');
+                alert('Cache wurde geleert!');
+            }
+        });
+    }
+    
+    // Hamburger menu navigation
+    document.querySelectorAll('.hamburger-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            const page = e.currentTarget.dataset.page;
+            console.log('Hamburger navigation to:', page);
+            navigateToPage(page);
+            if (hamburgerSidebar) hamburgerSidebar.classList.remove('active');
+        });
+    });
+    
+    console.log('All event listeners attached');
+}
+
+// Load Default Content
+async function loadDefaultContent() {
+    try {
+        console.log('loadDefaultContent() called');
+        currentPage = 'home';
+        if (sectionTitle) {
+            sectionTitle.innerHTML = '<i class="fas fa-fire"></i> Für dich empfohlen';
+        }
+        
+        // Load recommendations (mix of popular categories)
+        await loadRecommendations();
+        
+    } catch (error) {
+        console.error('loadDefaultContent error:', error);
+    }
+}
+
+// Load Recommendations
+async function loadRecommendations() {
+    try {
+        console.log('Loading recommendations...');
+        currentCategory = ''; // Clear category for recommendations
+        showLoading(true);
+        
+        // Mix of different genres for recommendations
+        const categories = ['Dokumentation', 'Spielfilm', 'Tatort', 'Reportage'];
+        const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+        
+        const payload = {
+            queries: [
+                { fields: ["title", "topic", "description"], query: randomCategory }
+            ],
+            sortBy: "timestamp",
+            sortOrder: "desc",
+            future: true,
+            offset: 0,
+            size: 50
+        };
+        
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        currentResults = data.result?.results || [];
+        originalResults = [...currentResults]; // Save before shuffle
+        
+        // Shuffle results for variety
+        currentResults = currentResults.sort(() => Math.random() - 0.5);
+        
+        console.log('Found', currentResults.length, 'recommendations');
+        
+        if (currentResults.length === 0) {
+            showEmpty(true);
+        } else {
+            displayResults();
+        }
+        
+    } catch (error) {
+        console.error('Recommendations error:', error);
+        // Fallback to Tatort if recommendations fail
+        await performSearch('Tatort');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Perform Search
+async function performSearch(query) {
+    try {
+        console.log('Searching for:', query);
+        currentQuery = query;
+        currentCategory = query; // Set category for series detection
+        currentOffset = 0;
+        displayedResults = [];
+        
+        // Hide verlauf when searching
+        if (recentlyWatched && query !== 'Tatort') {
+            recentlyWatched.style.display = 'none';
+        }
+        
+        if (searchInput) searchInput.value = query;
+        if (sectionTitle) sectionTitle.innerHTML = `<i class="fas fa-search"></i> ${query}`;
+        
+        showLoading(true);
+        
+        const payload = {
+            queries: [
+                { fields: ["title", "topic", "description"], query: query }
+            ],
+            sortBy: "timestamp",
+            sortOrder: "desc",
+            future: true,
+            offset: 0,
+            size: 200 // More results
+        };
+        
+        console.log('Fetching from API...');
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify(payload)
+        });
+        
+        console.log('Response status:', response.status);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Data received:', data);
+        
+        currentResults = data.result?.results || [];
+        originalResults = [...currentResults]; // Save original
+        console.log('Found', currentResults.length, 'videos');
+        
+        if (currentResults.length === 0) {
+            showEmpty(true);
+        } else {
+            displayResults();
+        }
+        
+    } catch (error) {
+        console.error('Search error:', error);
+        showEmpty(true);
+        if (emptyState) {
+            emptyState.innerHTML = `
+                <i class="fas fa-exclamation-triangle"></i>
+                <h3>Fehler beim Laden</h3>
+                <p>${error.message}</p>
+            `;
+        }
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Display Results
+function displayResults() {
+    try {
+        console.log('Displaying results...');
+        
+        if (!videoGrid) {
+            console.error('videoGrid not found!');
+            return;
+        }
+        
+        const toDisplay = currentResults.slice(0, resultsPerPage);
+        displayedResults = toDisplay;
+        
+        videoGrid.innerHTML = '';
+        showEmpty(false);
+        
+        // ALWAYS try to group by series - intelligent grouping will filter out non-series
+        console.log('Attempting series grouping for', toDisplay.length, 'items');
+        displaySeriesGrouped(toDisplay);
+        
+        // Update results count
+        if (resultsCount) {
+            resultsCount.textContent = `${currentResults.length} Ergebnisse`;
+        }
+        
+        // Show/hide load more button
+        const loadMoreContainer = document.querySelector('.load-more-container');
+        if (loadMoreContainer) {
+            if (currentResults.length > resultsPerPage) {
+                loadMoreContainer.style.display = 'block';
+            } else {
+                loadMoreContainer.style.display = 'none';
+            }
+        }
+        
+        console.log('Results displayed!');
+        
+    } catch (error) {
+        console.error('displayResults error:', error);
+    }
+}
+
+// Check if results are likely series episodes
+function isSeriesContext(items) {
+    if (items.length < 3) return false;
+    
+    // Exclude categories that should never be grouped as series
+    const excludeKeywords = [
+        'nachrichten', 'news', 'tagesschau', 'tagesthemen', 'heute', 'journal',
+        'sendung', 'spezial', 'extra', 'brennpunkt', 'live', 'wetter',
+        'spielfilm', 'tatort', 'polizeiruf'
+    ];
+    
+    // Check if multiple items share the same topic (series name)
+    const topics = new Map();
+    items.forEach(item => {
+        if (item.topic) {
+            const topicLower = item.topic.toLowerCase();
+            
+            // Skip if it's a news/special broadcast
+            const isExcluded = excludeKeywords.some(keyword => topicLower.includes(keyword));
+            if (isExcluded) return;
+            
+            // Check if title looks like series episode (contains numbers, "Folge", "Staffel", etc.)
+            const titleLower = item.title.toLowerCase();
+            const isEpisode = /folge|episode|staffel|s\d+e\d+|\d+\/\d+|teil \d+/.test(titleLower);
+            
+            if (isEpisode) {
+                topics.set(item.topic, (topics.get(item.topic) || 0) + 1);
+            }
+        }
+    });
+    
+    // If any topic appears 3+ times, treat as series
+    for (let count of topics.values()) {
+        if (count >= 3) return true;
+    }
+    
+    return false;
+}
+
+// Normalize series name for cross-channel grouping
+function normalizeSeriesName(name) {
+    if (!name) return 'Andere';
+    
+    let normalized = name.toLowerCase()
+        // Remove common prefixes/suffixes
+        .replace(/^(die |der |das |ein |eine )/i, '')
+        // Remove year in parentheses
+        .replace(/\s*\(\d{4}\)\s*/g, ' ')
+        // Remove "Die Sendung mit..."
+        .replace(/die sendung mit (der|dem) /i, '')
+        // Normalize special characters
+        .replace(/[äöüß]/g, (m) => ({ä:'a',ö:'o',ü:'u',ß:'ss'}[m]))
+        // Remove punctuation
+        .replace(/[^\w\s]/g, ' ')
+        // Collapse whitespace
+        .replace(/\s+/g, ' ')
+        .trim();
+    
+    return normalized;
+}
+
+// Display videos grouped by series
+function displaySeriesGrouped(items) {
+    // Group by normalized series name (cross-channel!)
+    const seriesMap = new Map();
+    const seriesOriginalNames = new Map(); // Store original names
+    const standaloneVideos = [];
+    
+    // Exclude keywords for things that shouldn't be grouped
+    const excludeKeywords = [
+        'nachrichten', 'news', 'tagesschau', 'tagesthemen', 'heute', 'journal',
+        'sendung', 'spezial', 'extra', 'brennpunkt', 'live', 'wetter', 'tatort',
+        'polizeiruf'
+    ];
+    
+    console.log('displaySeriesGrouped: Processing', items.length, 'items');
+    
+    items.forEach(item => {
+        const originalSeriesName = item.topic || 'Andere';
+        const normalizedName = normalizeSeriesName(originalSeriesName);
+        const topicLower = originalSeriesName.toLowerCase();
+        const titleLower = item.title.toLowerCase();
+        
+        console.log('Item:', item.title, '| Topic:', originalSeriesName, '| Normalized:', normalizedName);
+        
+        // Check if it should be excluded from grouping
+        const isExcluded = excludeKeywords.some(keyword => topicLower.includes(keyword));
+        
+        if (isExcluded) {
+            console.log('  → Excluded (keyword match)');
+            standaloneVideos.push(item);
+            return;
+        }
+        
+        // More flexible episode detection
+        const isEpisode = 
+            /folge|episode|staffel|s\d+e\d+|\d+\/\d+|teil \d+/i.test(titleLower) ||  // Classic patterns
+            /\b\d+\.\s/.test(titleLower) ||  // "1. Titel", "2. Titel"
+            /\(\d+\)/.test(titleLower) ||    // "(1)", "(2)"
+            /\d{1,3}\s*-\s*/.test(titleLower) || // "1 - Titel", "01 - Titel"
+            (item.topic && item.topic.length > 3 && /\d/.test(titleLower)); // Has topic + number in title
+        
+        if (!isEpisode) {
+            console.log('  → Not an episode (no pattern match)');
+            standaloneVideos.push(item);
+        } else {
+            console.log('  → Grouping as series:', normalizedName);
+            // Group as series using normalized name
+            if (!seriesMap.has(normalizedName)) {
+                seriesMap.set(normalizedName, []);
+                seriesOriginalNames.set(normalizedName, originalSeriesName);
+            }
+            seriesMap.get(normalizedName).push(item);
+        }
+    });
+    
+    console.log('Series map:', Array.from(seriesMap.keys()));
+    console.log('Standalone videos:', standaloneVideos.length);
+    
+    // Display series cards (only if 2+ episodes)
+    seriesMap.forEach((episodes, normalizedName) => {
+        console.log('Series:', normalizedName, '→', episodes.length, 'episodes');
+        if (episodes.length >= 2) {
+            // Use the most common original name or first one
+            const displayName = seriesOriginalNames.get(normalizedName);
+            const seriesCard = createSeriesCard(displayName, episodes);
+            videoGrid.appendChild(seriesCard);
+        } else {
+            // If only 1 episode, show as standalone
+            standaloneVideos.push(...episodes);
+        }
+    });
+    
+    // Display standalone videos
+    standaloneVideos.forEach((item, idx) => {
+        const card = createVideoCard(item, idx);
+        videoGrid.appendChild(card);
+    });
+}
+
+// Create series card
+function createSeriesCard(seriesName, episodes) {
+    const card = document.createElement('div');
+    card.className = 'series-card';
+    
+    // Use first episode's thumbnail
+    const thumbnail = generatePlaceholderThumbnail(episodes[0]);
+    const thumbnailId = `series_card_${btoa(seriesName).substring(0, 16)}`;
+    
+    card.innerHTML = `
+        <div class="series-card-thumbnail" id="${thumbnailId}" style="background-image: url(${thumbnail});">
+            <div class="duration-badge">${episodes.length} Folgen</div>
+        </div>
+        <div class="series-card-content">
+            <h3 class="series-card-title">${seriesName}</h3>
+            <div class="series-card-meta">
+                <span class="channel-badge">${episodes[0].channel}</span>
+                <span>${episodes.length} Folgen</span>
+            </div>
+        </div>
+    `;
+    
+    card.addEventListener('click', () => openSeriesDetail(seriesName, episodes));
+    
+    // Load real thumbnail if enabled
+    if (useRealThumbnails && episodes[0].url_video_low) {
+        setTimeout(() => {
+            const thumbEl = document.getElementById(thumbnailId);
+            if (thumbEl) {
+                loadRealThumbnail(episodes[0], thumbEl);
+            }
+        }, 200);
+    }
+    
+    return card;
+}
+
+// Open series detail page
+async function openSeriesDetail(seriesName, episodes) {
+    console.log('Opening series detail:', seriesName, 'with', episodes.length, 'episodes');
+    
+    // Hide current page
+    const mainPage = document.querySelector('.content-section:not([style*="display: none"])');
+    if (mainPage) {
+        mainPage.style.display = 'none';
+    }
+    
+    // Show series detail page
+    const detailPage = document.getElementById('seriesDetailPage');
+    detailPage.style.display = 'block';
+    
+    // Set title
+    document.getElementById('seriesDetailTitle').innerHTML = `<i class="fas fa-tv"></i> ${seriesName}`;
+    
+    // Try to get TMDB data for this series
+    let tmdbSeries = null;
+    let tmdbDetails = null;
+    
+    try {
+        tmdbSeries = await searchTMDBSeries(seriesName);
+        if (tmdbSeries && tmdbSeries.id) {
+            tmdbDetails = await getTMDBSeriesDetails(tmdbSeries.id);
+        }
+    } catch (e) {
+        console.log('Could not fetch TMDB data:', e);
+    }
+    
+    // Parse episodes to extract season and episode numbers
+    const parsedEpisodes = episodes.map(ep => {
+        const titleLower = ep.title.toLowerCase();
+        let season = null;
+        let episode = null;
+        
+        // Try to match "S01E01", "S1E1", "Staffel 1, Folge 1" patterns
+        const s1 = titleLower.match(/s(?:taffel)?[\s:]?(\d+)[\s,]*[ef](?:olge)?[\s:]?(\d+)/i);
+        if (s1) {
+            season = parseInt(s1[1]);
+            episode = parseInt(s1[2]);
+        }
+        
+        // Try "Folge 1" or "Episode 1" without season
+        if (!episode) {
+            const e1 = titleLower.match(/(?:folge|episode)[\s:]?(\d+)/i);
+            if (e1) {
+                episode = parseInt(e1[1]);
+                season = 1; // Default to season 1
+            }
+        }
+        
+        // Try to extract any numbers from title as episode number
+        if (!episode) {
+            const numbers = ep.title.match(/(\d+)/);
+            if (numbers) {
+                episode = parseInt(numbers[0]);
+                season = 1;
+            }
+        }
+        
+        return {
+            ...ep,
+            parsedSeason: season || 1,
+            parsedEpisode: episode || 0,
+            originalIndex: episodes.indexOf(ep)
+        };
+    });
+    
+    // Group by season
+    const seasonMap = new Map();
+    parsedEpisodes.forEach(ep => {
+        const season = ep.parsedSeason;
+        if (!seasonMap.has(season)) {
+            seasonMap.set(season, []);
+        }
+        seasonMap.get(season).push(ep);
+    });
+    
+    // Sort seasons and episodes
+    const sortedSeasons = Array.from(seasonMap.keys()).sort((a, b) => a - b);
+    sortedSeasons.forEach(season => {
+        const eps = seasonMap.get(season);
+        eps.sort((a, b) => a.parsedEpisode - b.parsedEpisode || a.originalIndex - b.originalIndex);
+    });
+    
+    // Display series info
+    const seriesInfo = document.getElementById('seriesInfo');
+    const firstEpisode = episodes[0];
+    
+    // Use TMDB description if available, otherwise use best from episodes
+    let bestDescription = firstEpisode.description || firstEpisode.topic || 'Keine Beschreibung verfügbar';
+    
+    if (tmdbDetails && tmdbDetails.overview) {
+        bestDescription = tmdbDetails.overview;
+        console.log('Using TMDB description');
+    } else {
+        // Try to find a good description from episodes
+        episodes.forEach(ep => {
+            if (ep.description && ep.description.length > bestDescription.length) {
+                const descLower = ep.description.toLowerCase();
+                if (!descLower.includes('folge') && !descLower.includes('episode') && !descLower.includes('teil')) {
+                    bestDescription = ep.description;
+                }
+            }
+        });
+    }
+    
+    const totalSeasons = sortedSeasons.length;
+    
+    // Generate poster ID for thumbnail
+    const posterId = `series_poster_${btoa(seriesName).substring(0, 16)}`;
+    
+    // Get TMDB poster if available
+    let posterHTML = `<i class="fas fa-tv" style="opacity: 0.3;"></i>`;
+    let posterStyle = '';
+    
+    if (tmdbDetails && tmdbDetails.poster_path) {
+        const posterURL = getTMDBPosterURL(tmdbDetails.poster_path);
+        posterStyle = `style="background-image: url(${posterURL}); background-size: cover; background-position: center;"`;
+        posterHTML = '';
+        console.log('Using TMDB poster');
+    }
+    
+    seriesInfo.innerHTML = `
+        <div class="series-info-poster" id="${posterId}" ${posterStyle}>
+            ${posterHTML}
+        </div>
+        <div class="series-info-details">
+            <h3>${seriesName}</h3>
+            <div class="series-info-meta">
+                <span><i class="fas fa-tv"></i> ${firstEpisode.channel}</span>
+                <span><i class="fas fa-layer-group"></i> ${totalSeasons} ${totalSeasons === 1 ? 'Staffel' : 'Staffeln'}</span>
+                <span><i class="fas fa-list"></i> ${episodes.length} Folgen</span>
+                ${tmdbDetails && tmdbDetails.first_air_date ? `<span><i class="fas fa-calendar"></i> ${tmdbDetails.first_air_date.split('-')[0]}</span>` : ''}
+            </div>
+            <div class="series-info-description">
+                ${bestDescription.length > 400 ? bestDescription.substring(0, 400) + '...' : bestDescription}
+            </div>
+        </div>
+    `;
+    
+    // Only load video thumbnail if TMDB didn't provide a poster
+    if (!tmdbDetails?.poster_path && useRealThumbnails && firstEpisode.url_video_low) {
+        setTimeout(() => {
+            const posterEl = document.getElementById(posterId);
+            if (posterEl && !posterEl.style.backgroundImage) {
+                captureVideoFrame(firstEpisode.url_video_low).then(thumbnail => {
+                    if (thumbnail) {
+                        posterEl.style.backgroundImage = `url(${thumbnail})`;
+                        posterEl.style.backgroundSize = 'cover';
+                        posterEl.style.backgroundPosition = 'center';
+                        posterEl.innerHTML = '';
+                    }
+                });
+            }
+        }, 500);
+    }
+    
+    // Display episodes grouped by season
+    const episodesGrid = document.getElementById('seriesEpisodesGrid');
+    episodesGrid.innerHTML = '';
+    
+    sortedSeasons.forEach(seasonNum => {
+        const seasonEpisodes = seasonMap.get(seasonNum);
+        
+        // Season header
+        const seasonHeader = document.createElement('div');
+        seasonHeader.style.cssText = 'grid-column: 1/-1; margin: 2rem 0 1rem 0; padding: 1rem; background: var(--surface); border-radius: 8px; border: 1px solid var(--border-color);';
+        seasonHeader.innerHTML = `
+            <h3 style="margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                <i class="fas fa-layer-group"></i>
+                Staffel ${seasonNum}
+                <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: normal;">(${seasonEpisodes.length} Folgen)</span>
+            </h3>
+        `;
+        episodesGrid.appendChild(seasonHeader);
+        
+        // Season episodes
+        seasonEpisodes.forEach((episode, idx) => {
+            const card = createVideoCard(episode, idx);
+            episodesGrid.appendChild(card);
+        });
+    });
+    
+    // Setup back button
+    const backBtn = document.getElementById('backFromSeries');
+    backBtn.onclick = () => {
+        detailPage.style.display = 'none';
+        if (mainPage) {
+            mainPage.style.display = 'block';
+        }
+    };
+}
+
+// Create Video Card
+function createVideoCard(item, index) {
+    const card = document.createElement('div');
+    card.className = 'video-card';
+    
+    const duration = Math.round(item.duration / 60);
+    const durationText = duration > 0 ? `${duration} Min` : 'Live';
+    
+    const thumbnail = generatePlaceholderThumbnail(item);
+    const thumbnailId = `thumb-${index}`;
+    
+    const date = new Date(item.timestamp * 1000);
+    const dateText = formatDate(date);
+    
+    card.innerHTML = `
+        <div class="video-thumbnail" id="${thumbnailId}" style="background: url(${thumbnail}); background-size: cover; background-position: center;">
+            <span class="duration-badge">${durationText}</span>
+        </div>
+        <div class="video-card-content">
+            <h3 class="video-card-title">${item.title}</h3>
+            <div class="video-card-meta">
+                <span class="channel-badge">${item.channel}</span>
+                <span class="video-date">${dateText}</span>
+            </div>
+        </div>
+    `;
+    
+    card.addEventListener('click', () => {
+        playVideo(item);
+    });
+    
+    // Load real thumbnail if enabled (with slight delay for staggering)
+    if (useRealThumbnails) {
+        setTimeout(() => {
+            const thumbEl = document.getElementById(thumbnailId);
+            if (thumbEl) {
+                loadRealThumbnail(item, thumbEl);
+            }
+        }, index * 150); // Stagger by 150ms per video
+    }
+    
+    return card;
+}
+
+// Generate Placeholder Thumbnail
+function generatePlaceholderThumbnail(item) {
+    const videoId = item.id || 'default';
+    
+    if (thumbnailCache[videoId]) {
+        return thumbnailCache[videoId];
+    }
+    
+    try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 320;
+        canvas.height = 180;
+        const ctx = canvas.getContext('2d', { alpha: false });
+        
+        // Sender colors
+        const colors = senderColors[item.channel] || senderColors['DEFAULT'];
+        
+        // Gradient background
+        const gradient = ctx.createLinearGradient(0, 0, 320, 180);
+        gradient.addColorStop(0, colors[0]);
+        gradient.addColorStop(1, colors[1]);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 320, 180);
+        
+        // Sender logo
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.font = 'bold 48px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.channel, 160, 90);
+        
+        // Duration badge
+        const duration = Math.round(item.duration / 60);
+        if (duration > 0) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(250, 150, 60, 20);
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'right';
+            ctx.fillText(`${duration} Min`, 290, 160);
+        }
+        
+        const thumbnail = canvas.toDataURL('image/jpeg', 0.8);
+        thumbnailCache[videoId] = thumbnail;
+        
+        return thumbnail;
+        
+    } catch (error) {
+        console.error('Thumbnail generation error:', error);
+        // Return a simple color as fallback
+        return 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="%23374151"/></svg>';
+    }
+}
+
+// Show/Hide States
+function showLoading(show) {
+    if (loadingState) loadingState.style.display = show ? 'flex' : 'none';
+    if (show && videoGrid) videoGrid.innerHTML = '';
+    if (show && emptyState) emptyState.style.display = 'none';
+}
+
+function showEmpty(show) {
+    if (emptyState) emptyState.style.display = show ? 'block' : 'none';
+    if (show && videoGrid) videoGrid.innerHTML = '';
+}
+
+// Play Video
+function playVideo(item) {
+    try {
+        const videoUrl = item.url_video_hd || item.url_video || item.url_video_low;
+        
+        if (!videoUrl) {
+            alert('Video-URL nicht verfügbar');
+            return;
+        }
+        
+        // Set video info
+        const titleEl = document.getElementById('videoTitle');
+        const channelEl = document.getElementById('videoChannel');
+        const durationEl = document.getElementById('videoDuration');
+        const dateEl = document.getElementById('videoDate');
+        const descEl = document.getElementById('videoDescription');
+        
+        if (titleEl) titleEl.textContent = item.title;
+        if (channelEl) channelEl.textContent = item.channel;
+        if (durationEl) durationEl.textContent = `${Math.round(item.duration / 60)} Min`;
+        if (dateEl) dateEl.textContent = formatDate(new Date(item.timestamp * 1000));
+        
+        // Full description with "Mehr" button
+        const description = item.description || item.topic || 'Keine Beschreibung';
+        if (descEl) {
+            if (description.length > 200) {
+                const short = description.substring(0, 200) + '...';
+                const descId = 'descText_' + Date.now();
+                descEl.innerHTML = `
+                    <span id="${descId}">${short}</span> 
+                    <button class="more-btn" data-desc-id="${descId}" data-full="${encodeURIComponent(description)}" data-short="${encodeURIComponent(short)}" onclick="window.toggleModalDesc(this)">
+                        Mehr anzeigen
+                    </button>
+                `;
+            } else {
+                descEl.textContent = description;
+            }
+        }
+        
+        // Store current video URL for share button
+        window.currentVideoUrl = videoUrl;
+        window.currentVideoTitle = item.title;
+        
+        // Setup quality selector
+        const qualitySelector = document.getElementById('qualitySelector');
+        if (qualitySelector) {
+            qualitySelector.innerHTML = '';
+            
+            const qualities = [];
+            if (item.url_video_hd) qualities.push({ label: 'HD', url: item.url_video_hd });
+            if (item.url_video) qualities.push({ label: 'Normal', url: item.url_video });
+            if (item.url_video_low) qualities.push({ label: 'Niedrig', url: item.url_video_low });
+            
+            qualities.forEach((q, idx) => {
+                const option = document.createElement('option');
+                option.value = q.url;
+                option.textContent = q.label;
+                if (idx === 0) option.selected = true;
+                qualitySelector.appendChild(option);
+            });
+            
+            qualitySelector.onchange = (e) => {
+                const currentTime = videoPlayer.currentTime;
+                loadVideoSource(e.target.value, currentTime);
+            };
+        }
+        
+        // Setup subtitle selector
+        const subtitleSelector = document.getElementById('subtitleSelector');
+        const subtitleSelectorContainer = document.getElementById('subtitleSelectorContainer');
+        const subtitleTrack = document.getElementById('subtitleTrack');
+        
+        // Always clear and reset subtitle track first
+        if (subtitleTrack) {
+            subtitleTrack.src = '';
+            // Disable all text tracks
+            if (videoPlayer.textTracks) {
+                Array.from(videoPlayer.textTracks).forEach(track => {
+                    track.mode = 'disabled';
+                });
+            }
+        }
+        
+        if (subtitleSelector && subtitleSelectorContainer) {
+            subtitleSelector.innerHTML = '<option value="off" selected>Aus</option>';
+            
+            // Check if subtitles available
+            if (item.url_subtitle) {
+                console.log('Subtitles available:', item.url_subtitle);
+                
+                // Show subtitle selector
+                subtitleSelectorContainer.style.display = 'flex';
+                
+                const option = document.createElement('option');
+                option.value = item.url_subtitle;
+                option.textContent = 'Deutsch';
+                subtitleSelector.appendChild(option);
+                
+                // Set subtitle track src (but don't enable yet)
+                if (subtitleTrack) {
+                    subtitleTrack.src = item.url_subtitle;
+                }
+                
+                subtitleSelector.disabled = false;
+            } else {
+                // Hide subtitle selector completely if no subtitles
+                subtitleSelectorContainer.style.display = 'none';
+            }
+            
+            // Handle subtitle selection change
+            subtitleSelector.onchange = (e) => {
+                console.log('Subtitle changed to:', e.target.value);
+                
+                if (!subtitleTrack) return;
+                
+                // Wait for track to be loaded
+                const enableSubtitle = () => {
+                    if (videoPlayer.textTracks && videoPlayer.textTracks.length > 0) {
+                        const track = videoPlayer.textTracks[0];
+                        
+                        if (e.target.value === 'off') {
+                            track.mode = 'disabled';
+                            console.log('Subtitles disabled');
+                        } else {
+                            subtitleTrack.src = e.target.value;
+                            track.mode = 'showing';
+                            console.log('Subtitles enabled');
+                        }
+                    }
+                };
+                
+                // Try immediately and with delay
+                enableSubtitle();
+                setTimeout(enableSubtitle, 100);
+                setTimeout(enableSubtitle, 500);
+            };
+        }
+        
+        // Load video
+        loadVideoSource(videoUrl);
+        
+        // Show modal
+        if (videoModal) videoModal.classList.add('active');
+        
+        // Save to recently watched
+        saveToRecentlyWatched(item);
+        
+    } catch (error) {
+        console.error('Play video error:', error);
+        alert('Fehler beim Abspielen: ' + error.message);
+    }
+}
+
+function loadVideoSource(videoUrl, resumeTime = 0) {
+    try {
+        if (videoUrl.includes('.m3u8') && typeof Hls !== 'undefined') {
+            if (Hls.isSupported()) {
+                if (hlsInstance) hlsInstance.destroy();
+                hlsInstance = new Hls();
+                hlsInstance.loadSource(videoUrl);
+                hlsInstance.attachMedia(videoPlayer);
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                    if (resumeTime > 0) videoPlayer.currentTime = resumeTime;
+                    videoPlayer.play();
+                });
+            } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                videoPlayer.src = videoUrl;
+                if (resumeTime > 0) videoPlayer.currentTime = resumeTime;
+                videoPlayer.play();
+            }
+        } else {
+            videoPlayer.src = videoUrl;
+            if (resumeTime > 0) videoPlayer.currentTime = resumeTime;
+            videoPlayer.play();
+        }
+    } catch (error) {
+        console.error('Load video error:', error);
+    }
+}
+
+function closeVideoModal() {
+    try {
+        if (videoModal) videoModal.classList.remove('active');
+        if (videoPlayer) {
+            videoPlayer.pause();
+            videoPlayer.src = '';
+        }
+        if (hlsInstance) {
+            hlsInstance.destroy();
+            hlsInstance = null;
+        }
+    } catch (error) {
+        console.error('Close modal error:', error);
+    }
+}
+
+// Apply Filters
+function applyFilters() {
+    console.log('Applying filters...');
+    
+    const channel = document.getElementById('channelFilter')?.value;
+    const genre = document.getElementById('genreFilter')?.value;
+    const minDuration = parseInt(document.getElementById('durationFilter')?.value || '0');
+    const sortBy = document.getElementById('sortFilter')?.value;
+    
+    console.log('Filter values:', { channel, genre, minDuration, sortBy });
+    console.log('Original results length:', originalResults.length);
+    console.log('Current results length:', currentResults.length);
+    
+    // Filter from original results (or current if original is empty)
+    let filtered = [...(originalResults.length > 0 ? originalResults : currentResults)];
+    
+    console.log('Starting with', filtered.length, 'results');
+    
+    // Channel filter
+    if (channel) {
+        filtered = filtered.filter(item => item.channel === channel);
+        console.log('After channel filter:', filtered.length);
+    }
+    
+    // Genre filter
+    if (genre) {
+        filtered = filtered.filter(item => {
+            const title = (item.title || '').toLowerCase();
+            const topic = (item.topic || '').toLowerCase();
+            const description = (item.description || '').toLowerCase();
+            const searchGenre = genre.toLowerCase();
+            return title.includes(searchGenre) || topic.includes(searchGenre) || description.includes(searchGenre);
+        });
+        console.log('After genre filter:', filtered.length);
+    }
+    
+    // Duration filter (convert to minutes)
+    if (minDuration > 0) {
+        filtered = filtered.filter(item => {
+            const durationMinutes = Math.round(item.duration / 60);
+            return durationMinutes >= minDuration;
+        });
+        console.log('After duration filter:', filtered.length, '(min duration:', minDuration, 'min)');
+    }
+    
+    // Sorting
+    if (sortBy === 'duration') {
+        filtered.sort((a, b) => b.duration - a.duration);
+    } else if (sortBy === 'title') {
+        filtered.sort((a, b) => a.title.localeCompare(b.title));
+    } else if (sortBy === 'episode') {
+        // Sort by episode number
+        filtered.sort((a, b) => {
+            const extractEpisode = (title) => {
+                console.log('Extracting from:', title);
+                
+                // S02E03 pattern
+                const sxex = title.match(/S(\d+)E(\d+)/i);
+                if (sxex) {
+                    const val = parseInt(sxex[1]) * 1000 + parseInt(sxex[2]);
+                    console.log('  → S*E* pattern:', val);
+                    return val;
+                }
+                
+                // Staffel X Folge Y
+                const staffelFolge = title.match(/Staffel\s*(\d+).*?Folge\s*(\d+)/i);
+                if (staffelFolge) {
+                    const val = parseInt(staffelFolge[1]) * 1000 + parseInt(staffelFolge[2]);
+                    console.log('  → Staffel/Folge:', val);
+                    return val;
+                }
+                
+                // Just Folge/Episode number
+                const folge = title.match(/(?:Folge|Episode|Ep\.?)\s*(\d+)/i);
+                if (folge) {
+                    const val = parseInt(folge[1]);
+                    console.log('  → Folge number:', val);
+                    return val;
+                }
+                
+                // "1. Title", "2. Title"
+                const dotNumber = title.match(/^(\d+)\.\s/);
+                if (dotNumber) {
+                    const val = parseInt(dotNumber[1]);
+                    console.log('  → Dot number:', val);
+                    return val;
+                }
+                
+                // "(1)", "(2)"
+                const parenNumber = title.match(/\((\d+)\)/);
+                if (parenNumber) {
+                    const val = parseInt(parenNumber[1]);
+                    console.log('  → Paren number:', val);
+                    return val;
+                }
+                
+                // "1 - Title", "01 - Title"
+                const dashNumber = title.match(/^(\d{1,3})\s*-\s/);
+                if (dashNumber) {
+                    const val = parseInt(dashNumber[1]);
+                    console.log('  → Dash number:', val);
+                    return val;
+                }
+                
+                // Just Staffel
+                const staffel = title.match(/Staffel\s*(\d+)/i);
+                if (staffel) {
+                    const val = parseInt(staffel[1]) * 1000;
+                    console.log('  → Staffel only:', val);
+                    return val;
+                }
+                
+                // Any number in title as last resort
+                const anyNumber = title.match(/\d+/);
+                if (anyNumber) {
+                    const val = parseInt(anyNumber[0]);
+                    console.log('  → Any number:', val);
+                    return val;
+                }
+                
+                console.log('  → No number found: 0');
+                return 0;
+            };
+            const aEp = extractEpisode(a.title);
+            const bEp = extractEpisode(b.title);
+            if (aEp !== bEp) return aEp - bEp;
+            return a.title.localeCompare(b.title);
+        });
+        console.log('Sorted by episode number');
+    } else if (sortBy === 'date') {
+        filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    }
+    
+    console.log('After sorting:', sortBy);
+    
+    currentResults = filtered;
+    currentOffset = 0;
+    displayedResults = [];
+    
+    if (videoGrid) videoGrid.innerHTML = '';
+    
+    if (filtered.length === 0) {
+        console.log('No results after filter');
+        showEmpty(true);
+        if (emptyState) {
+            emptyState.innerHTML = `
+                <i class="fas fa-filter"></i>
+                <h3>Keine Ergebnisse</h3>
+                <p>Keine Videos mit diesen Filtern gefunden. Versuche andere Filter.</p>
+            `;
+        }
+    } else {
+        showEmpty(false);
+        displayResults();
+    }
+    
+    // Close filter sidebar
+    if (filterSidebar) filterSidebar.classList.remove('active');
+    
+    console.log('Filters applied! Results:', filtered.length);
+}
+
+// Display More Results
+function displayMoreResults() {
+    currentOffset += resultsPerPage;
+    const toDisplay = currentResults.slice(currentOffset, currentOffset + resultsPerPage);
+    
+    toDisplay.forEach((item, index) => {
+        const card = createVideoCard(item, currentOffset + index);
+        if (videoGrid) videoGrid.appendChild(card);
+    });
+    
+    displayedResults = currentResults.slice(0, currentOffset + resultsPerPage);
+    
+    if (currentOffset + resultsPerPage >= currentResults.length) {
+        const loadMoreContainer = document.querySelector('.load-more-container');
+        if (loadMoreContainer) loadMoreContainer.style.display = 'none';
+    }
+}
+
+// Page Navigation
+function navigateToPage(page) {
+    currentPage = page;
+    
+    const mainVideoSection = document.getElementById('mainVideoSection');
+    const historyPage = document.getElementById('historyPage');
+    const recentlyWatched = document.getElementById('recentlyWatched');
+    
+    if (page === 'home') {
+        if (mainVideoSection) mainVideoSection.style.display = 'block';
+        if (historyPage) historyPage.style.display = 'none';
+        if (recentlyWatched) recentlyWatched.style.display = 'block'; // Show on home
+        loadDefaultContent();
+        loadRecentlyWatched();
+    } else if (page === 'history') {
+        if (mainVideoSection) mainVideoSection.style.display = 'none';
+        if (historyPage) historyPage.style.display = 'block';
+        if (recentlyWatched) recentlyWatched.style.display = 'none'; // Hide on history page
+        loadFullHistoryPage();
+    }
+}
+
+// Load Full History Page
+function loadFullHistoryPage() {
+    const recent = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
+    const historyGrid = document.getElementById('historyGrid');
+    
+    if (!historyGrid) return;
+    
+    if (recent.length === 0) {
+        historyGrid.innerHTML = '<div class="empty-state"><i class="fas fa-history"></i><h3>Kein Verlauf</h3><p>Du hast noch keine Videos angesehen</p></div>';
+        return;
+    }
+    
+    historyGrid.innerHTML = '';
+    recent.forEach((item, index) => {
+        const card = createVideoCard(item, index);
+        historyGrid.appendChild(card);
+    });
+}
+
+// Filter History Page
+function filterHistoryPage(query) {
+    const recent = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
+    const historyGrid = document.getElementById('historyGrid');
+    
+    if (!historyGrid) return;
+    
+    if (!query) {
+        loadFullHistoryPage();
+        return;
+    }
+    
+    const filtered = recent.filter(item => 
+        item.title.toLowerCase().includes(query.toLowerCase()) ||
+        item.channel.toLowerCase().includes(query.toLowerCase()) ||
+        (item.description && item.description.toLowerCase().includes(query.toLowerCase()))
+    );
+    
+    historyGrid.innerHTML = '';
+    
+    if (filtered.length === 0) {
+        historyGrid.innerHTML = '<div class="empty-state"><i class="fas fa-search"></i><h3>Keine Ergebnisse</h3><p>Keine Videos im Verlauf gefunden</p></div>';
+        return;
+    }
+    
+    filtered.forEach((item, index) => {
+        const card = createVideoCard(item, index);
+        historyGrid.appendChild(card);
+    });
+}
+
+// Recently Watched Functions
+function loadRecentlyWatched() {
+    const recent = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
+    
+    if (!recentlyWatched || !recentGrid) return;
+    
+    if (recent.length === 0) {
+        recentlyWatched.style.display = 'none';
+        return;
+    }
+    
+    recentlyWatched.style.display = 'block';
+    recentGrid.innerHTML = '';
+    
+    // Show full row (10 videos) on home page
+    recent.slice(0, 10).forEach((item, index) => {
+        const card = createVideoCard(item, index);
+        recentGrid.appendChild(card);
+    });
+}
+
+function saveToRecentlyWatched(item) {
+    let recent = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
+    
+    // Better duplicate detection: title + channel + timestamp
+    const key = `${item.title}_${item.channel}_${item.timestamp}`;
+    recent = recent.filter(r => {
+        const rKey = `${r.title}_${r.channel}_${r.timestamp}`;
+        return rKey !== key;
+    });
+    
+    recent.unshift({
+        id: item.id,
+        title: item.title,
+        channel: item.channel,
+        duration: item.duration,
+        timestamp: item.timestamp,
+        topic: item.topic,
+        description: item.description || item.topic,
+        url_video: item.url_video,
+        url_video_hd: item.url_video_hd,
+        url_video_low: item.url_video_low,
+        watchedAt: Date.now()
+    });
+    recent = recent.slice(0, 50); // Keep more history
+    localStorage.setItem('recentlyWatched', JSON.stringify(recent));
+    loadRecentlyWatched();
+}
+
+// Toggle Description in Modal
+function toggleDescription(fullDesc, shortDesc) {
+    const descText = document.getElementById('descText');
+    const btn = document.querySelector('#videoDescription .more-btn');
+    
+    if (btn && btn.textContent === 'Mehr anzeigen') {
+        if (descText) descText.textContent = fullDesc;
+        btn.textContent = 'Weniger anzeigen';
+    } else {
+        if (descText) descText.textContent = shortDesc;
+        if (btn) btn.textContent = 'Mehr anzeigen';
+    }
+}
+
+// Share Video
+async function shareVideo() {
+    const url = window.currentVideoUrl || videoPlayer.src;
+    const title = window.currentVideoTitle || document.getElementById('videoTitle')?.textContent || 'Video';
+    
+    if (navigator.share) {
+        try {
+            await navigator.share({
+                title: title,
+                text: `Schau dir "${title}" an!`,
+                url: url
+            });
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                copyToClipboard(url);
+            }
+        }
+    } else {
+        copyToClipboard(url);
+    }
+}
+
+function copyToClipboard(text) {
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+            alert('Link in Zwischenablage kopiert!');
+        });
+    } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        alert('Link in Zwischenablage kopiert!');
+    }
+}
+
+// Format Date
+function formatDate(date) {
+    const now = new Date();
+    const diffTime = Math.abs(now - date);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return 'Heute';
+    if (diffDays === 1) return 'Gestern';
+    if (diffDays < 7) return `vor ${diffDays} Tagen`;
+    if (diffDays < 30) return `vor ${Math.floor(diffDays / 7)} Wochen`;
+    
+    return date.toLocaleDateString('de-DE');
+}
+
+// Info Modal
+function showInfoModal(type) {
+    const modal = document.getElementById('infoModal');
+    const body = document.getElementById('infoModalBody');
+    
+    if (!modal || !body) return;
+    
+    const content = {
+        about: `
+            <h2>Über StreamHub</h2>
+            <p>StreamHub ist eine moderne Desktop-Anwendung für deutsche öffentlich-rechtliche Mediatheken.</p>
+            <h3>Features</h3>
+            <ul>
+                <li>✅ Tausende Videos durchsuchen</li>
+                <li>✅ Generierte Thumbnails mit Sender-Branding</li>
+                <li>✅ Filter nach Sender und Dauer</li>
+                <li>✅ Zuletzt angesehen Funktion</li>
+                <li>✅ HD-Qualität wo verfügbar</li>
+                <li>✅ Keine Registrierung erforderlich</li>
+            </ul>
+            <p style="margin-top: 1rem;"><strong>Version:</strong> 3.0.0 (2026)</p>
+        `,
+        faq: `
+            <h2>Häufig gestellte Fragen</h2>
+            
+            <h3>Woher kommen die Videos?</h3>
+            <p>Von den offiziellen Mediatheken der öffentlich-rechtlichen Sender (ARD, ZDF, etc.)</p>
+            
+            <h3>Sind die Thumbnails echt?</h3>
+            <p>Die Thumbnails werden automatisch generiert mit Sender-Branding für beste Performance.</p>
+            
+            <h3>Ist StreamHub kostenlos?</h3>
+            <p>Ja, komplett kostenlos und Open Source.</p>
+            
+            <h3>Brauche ich einen Account?</h3>
+            <p>Nein, keine Registrierung nötig.</p>
+            
+            <h3>Werden meine Daten gespeichert?</h3>
+            <p>Nur lokal auf deinem Gerät (Verlauf). Keine Cloud, keine Server.</p>
+        `,
+        imprint: `
+            <h2>Impressum</h2>
+            <p>StreamHub ist ein Open-Source Projekt.</p>
+            <p>Diese App ist eine inoffizielle Drittanbieter-Anwendung und steht in keiner Verbindung zu den öffentlich-rechtlichen Sendern.</p>
+            <p><strong>Hinweis:</strong> Alle Videos und Inhalte sind Eigentum der jeweiligen Sender.</p>
+        `,
+        privacy: `
+            <h2>Datenschutzerklärung</h2>
+            
+            <h3>Datenerfassung</h3>
+            <p>Diese App speichert:</p>
+            <ul>
+                <li>✅ <strong>LocalStorage</strong>: Verlauf (nur lokal, nicht auf Server)</li>
+                <li>✅ <strong>Keine Cookies</strong></li>
+                <li>✅ <strong>Keine Tracking-Tools</strong></li>
+                <li>✅ <strong>Keine Accounts</strong></li>
+            </ul>
+            
+            <h3>Externe Dienste</h3>
+            <ul>
+                <li>📺 <strong>Videos</strong>: Von Sender-Servern geladen</li>
+                <li>🔌 <strong>CDN</strong>: Font Awesome, HLS.js</li>
+            </ul>
+        `,
+        terms: `
+            <h2>Nutzungsbedingungen</h2>
+            
+            <h3>1. Nutzung</h3>
+            <p>Diese App ist:</p>
+            <ul>
+                <li>✅ Kostenlos</li>
+                <li>✅ Open Source</li>
+                <li>✅ Ohne Garantie ("as-is")</li>
+            </ul>
+            
+            <h3>2. Haftungsausschluss</h3>
+            <ul>
+                <li>⚠️ <strong>Inoffizielle App</strong> - Keine Verbindung zu den Sendern</li>
+                <li>⚠️ <strong>Keine Garantie</strong> für Verfügbarkeit</li>
+                <li>⚠️ <strong>Video-Inhalte</strong> gehören den Sendern</li>
+            </ul>
+            
+            <h3>3. Urheberrecht</h3>
+            <p>Alle Videos sind urheberrechtlich geschützt und gehören den jeweiligen öffentlich-rechtlichen Sendern.</p>
+        `
+    };
+    
+    body.innerHTML = content[type] || '<p>Inhalt nicht gefunden</p>';
+    modal.classList.add('active');
+}
+
+console.log('Renderer.js loaded successfully!');
+
+// ===== LIVE TV CHANNELS =====
+const liveChannels = [
+    { name: 'Das Erste', channel: 'ARD', url: 'https://mcdn.daserste.de/daserste/de/master.m3u8' },
+    { name: 'ZDF', channel: 'ZDF', url: 'https://zdf-hls-15.akamaized.net/hls/live/2016498/de/high/master.m3u8' },
+    { name: 'ARD-alpha', channel: 'ARD', url: 'https://brlive-lh.akamaihd.net/i/bralpha_germany@119899/master.m3u8' },
+    { name: 'Phoenix', channel: 'ARD', url: 'https://zdf-hls-18.akamaized.net/hls/live/2016501/de/high/master.m3u8' },
+    { name: 'tagesschau24', channel: 'ARD', url: 'https://tagesschau.akamaized.net/hls/live/2020115/tagesschau/tagesschau_1/master.m3u8' },
+    { name: '3sat', channel: '3sat', url: 'https://zdf-hls-16.akamaized.net/hls/live/2016499/de/high/master.m3u8' },
+    { name: 'ARTE', channel: 'ARTE', url: 'https://artesimulcast.akamaized.net/hls/live/2030993/artelive_de/master.m3u8' },
+    { name: 'BR Fernsehen', channel: 'BR', url: 'https://brlive-lh.akamaihd.net/i/bfssued_germany@119890/master.m3u8' },
+    { name: 'hr-fernsehen', channel: 'HR', url: 'https://hrhls.akamaized.net/hls/live/2024525/hrhls/master.m3u8' },
+    { name: 'MDR', channel: 'MDR', url: 'https://mdrlive-lh.akamaihd.net/i/livetvmdrsachsen_de@513998/master.m3u8' },
+    { name: 'NDR Fernsehen', channel: 'NDR', url: 'https://ndrlive-lh.akamaihd.net/i/ndrfs_nds@430233/master.m3u8' },
+    { name: 'rbb Fernsehen', channel: 'RBB', url: 'https://rbblive-lh.akamaihd.net/i/rbb_berlin@144674/master.m3u8' },
+    { name: 'SR Fernsehen', channel: 'SR', url: 'https://srlive-lh.akamaihd.net/i/sr_universal02@107595/master.m3u8' },
+    { name: 'SWR Fernsehen', channel: 'SWR', url: 'https://swrbw-lh.akamaihd.net/i/swrbw_live@196738/master.m3u8' },
+    { name: 'WDR Fernsehen', channel: 'WDR', url: 'https://wdrlive-lh.akamaihd.net/i/wdrfs_geogeblockt@112724/master.m3u8' }
+];
+
+function loadLiveChannels() {
+    console.log('Loading live channels...');
+    const grid = document.getElementById('liveChannelsGrid');
+    if (!grid) {
+        console.error('liveChannelsGrid not found!');
+        return;
+    }
+    
+    grid.innerHTML = '';
+    
+    liveChannels.forEach(channel => {
+        const card = document.createElement('div');
+        card.className = 'live-channel-card';
+        
+        const colors = senderColors[channel.channel] || senderColors.DEFAULT;
+        
+        card.innerHTML = `
+            <div class="live-channel-thumbnail" style="background: linear-gradient(135deg, ${colors[0]}, ${colors[1]})">
+                <div class="live-badge">
+                    <i class="fas fa-circle"></i> LIVE
+                </div>
+                <i class="fas fa-broadcast-tower" style="font-size: 3rem; opacity: 0.3;"></i>
+            </div>
+            <div class="live-channel-info">
+                <h3>${channel.name}</h3>
+                <span class="channel-badge" style="background: ${colors[0]}">${channel.channel}</span>
+            </div>
+        `;
+        
+        card.addEventListener('click', () => {
+            console.log('Playing channel:', channel.name);
+            playLiveChannel(channel);
+        });
+        
+        grid.appendChild(card);
+    });
+    
+    console.log('Live channels loaded!');
+}
+
+function playLiveChannel(channel) {
+    try {
+        console.log('playLiveChannel:', channel.name);
+        
+        if (!videoModal || !videoPlayer) {
+            console.error('Modal/Player not found!');
+            return;
+        }
+        
+        videoModal.classList.add('active');
+        
+        const videoTitle = document.getElementById('videoTitle');
+        const videoChannel = document.getElementById('videoChannel');
+        const videoDescription = document.getElementById('videoDescription');
+        
+        if (videoTitle) videoTitle.textContent = channel.name + ' - Live';
+        if (videoChannel) {
+            const colors = senderColors[channel.channel] || senderColors.DEFAULT;
+            videoChannel.textContent = channel.channel;
+            videoChannel.style.background = colors[0];
+        }
+        if (videoDescription) videoDescription.textContent = 'Live-Stream';
+        
+        // Load HLS stream
+        if (channel.url.includes('.m3u8') && typeof Hls !== 'undefined') {
+            if (Hls.isSupported()) {
+                if (hlsInstance) hlsInstance.destroy();
+                hlsInstance = new Hls();
+                hlsInstance.loadSource(channel.url);
+                hlsInstance.attachMedia(videoPlayer);
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                    videoPlayer.play();
+                });
+            } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                videoPlayer.src = channel.url;
+                videoPlayer.play();
+            }
+        } else {
+            videoPlayer.src = channel.url;
+            videoPlayer.play();
+        }
+        
+        console.log('Live channel playing!');
+    } catch (error) {
+        console.error('playLiveChannel error:', error);
+        alert('Fehler beim Laden des Live-Streams: ' + error.message);
+    }
+}
+
+// ===== LOKALE VIDEOS =====
+
+function loadLocalFolders() {
+    console.log('Loading local folders...');
+    localFolders = JSON.parse(localStorage.getItem('localFolders') || '[]');
+    console.log('Local folders:', localFolders);
+}
+
+function saveLocalFolders() {
+    localStorage.setItem('localFolders', JSON.stringify(localFolders));
+    console.log('Local folders saved');
+}
+
+async function addLocalFolderDialog() {
+    console.log('addLocalFolderDialog called');
+    if (window.electronAPI && window.electronAPI.selectFolder) {
+        console.log('ElectronAPI available, selecting folder...');
+        const folderPath = await window.electronAPI.selectFolder();
+        console.log('Selected folder:', folderPath);
+        if (folderPath) {
+            if (!localFolders.includes(folderPath)) {
+                localFolders.push(folderPath);
+                saveLocalFolders();
+                await scanLocalVideos();
+            }
+        }
+    } else {
+        console.error('ElectronAPI not available');
+        alert('Diese Funktion benötigt die Desktop-Version (Electron)');
+    }
+}
+
+async function scanLocalVideos() {
+    console.log('Scanning local videos...');
+    localVideos = [];
+    
+    if (window.electronAPI && window.electronAPI.scanVideos) {
+        for (const folder of localFolders) {
+            try {
+                console.log('Scanning folder:', folder);
+                const videos = await window.electronAPI.scanVideos(folder);
+                console.log('Found videos:', videos.length);
+                localVideos.push(...videos);
+            } catch (e) {
+                console.error('Scan error:', e);
+            }
+        }
+    }
+    
+    loadLocalVideosPage();
+}
+
+function loadLocalVideosPage() {
+    console.log('Loading local videos page...');
+    const container = document.getElementById('localFoldersContainer');
+    const grid = document.getElementById('localFoldersGrid');
+    
+    if (!container || !grid) {
+        console.error('Local video elements not found!');
+        return;
+    }
+    
+    // Show folders as cards
+    if (localFolders.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-folder-open"></i>
+                <h3>Keine lokalen Ordner</h3>
+                <p>Füge einen Ordner hinzu, um lokale Videos anzuzeigen</p>
+            </div>
+        `;
+        grid.innerHTML = '';
+        container.style.display = 'block';
+        return;
+    }
+    
+    container.style.display = 'none';
+    
+    // Group videos by folder
+    const videosByFolder = {};
+    localVideos.forEach(video => {
+        const folder = video.path.substring(0, video.path.lastIndexOf('/') || video.path.lastIndexOf('\\'));
+        if (!videosByFolder[folder]) {
+            videosByFolder[folder] = [];
+        }
+        videosByFolder[folder].push(video);
+    });
+    
+    // Create folder cards
+    grid.innerHTML = '';
+    
+    console.log('Creating folder cards for', localFolders.length, 'folders');
+    console.log('Videos by folder:', videosByFolder);
+    
+    localFolders.forEach(folder => {
+        const videos = videosByFolder[folder] || [];
+        const folderName = folder.split('/').pop() || folder.split('\\').pop() || folder;
+        
+        console.log(`Folder "${folderName}":`, videos.length, 'videos');
+        
+        const card = document.createElement('div');
+        card.className = 'folder-card';
+        
+        // Get first video thumbnail for preview (if available)
+        const previewVideo = videos[0];
+        let thumbnailHtml = `<i class="fas fa-folder"></i>`;
+        
+        // Show warning if no videos found
+        const videoCountClass = videos.length === 0 ? 'style="background: #dc2626;"' : '';
+        const videoCountText = videos.length === 0 ? '⚠ Keine Videos' : `${videos.length} Videos`;
+        
+        card.innerHTML = `
+            <div class="folder-card-thumbnail">
+                ${thumbnailHtml}
+                <div class="duration-badge" ${videoCountClass}>${videoCountText}</div>
+            </div>
+            <div class="folder-card-content">
+                <h3 class="folder-card-title">${folderName}</h3>
+                <div class="folder-card-meta">
+                    <span class="folder-card-path">${folder}</span>
+                    <button class="folder-action-btn" onclick="event.stopPropagation(); removeLocalFolder('${folder.replace(/'/g, "\\'")}')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Only allow clicking if there are videos
+        if (videos.length > 0) {
+            card.addEventListener('click', () => openFolderDetail(folder, videos));
+        } else {
+            card.style.opacity = '0.6';
+            card.style.cursor = 'not-allowed';
+        }
+        
+        grid.appendChild(card);
+    });
+    
+    console.log('Local videos page loaded as folder cards!');
+}
+
+// Open folder detail page
+function openFolderDetail(folderPath, videos) {
+    console.log('Opening folder detail:', folderPath);
+    
+    // Hide local page, show detail page
+    document.getElementById('localPage').style.display = 'none';
+    document.getElementById('localFolderDetailPage').style.display = 'block';
+    
+    // Set title
+    const folderName = folderPath.split('/').pop() || folderPath.split('\\').pop() || folderPath;
+    document.getElementById('folderDetailTitle').innerHTML = `<i class="fas fa-folder-open"></i> ${folderName}`;
+    
+    // Store current folder for sorting
+    window.currentFolderVideos = videos;
+    window.currentFolderPath = folderPath;
+    
+    // Initial render
+    renderFolderVideos(videos);
+    
+    // Setup sorting
+    const sortSelect = document.getElementById('localSortBy');
+    if (sortSelect) {
+        sortSelect.value = 'name';
+        sortSelect.onchange = () => {
+            const sortedVideos = sortFolderVideos(window.currentFolderVideos, sortSelect.value);
+            renderFolderVideos(sortedVideos);
+        };
+    }
+}
+
+// Sort folder videos
+function sortFolderVideos(videos, sortBy) {
+    const sorted = [...videos];
+    
+    switch(sortBy) {
+        case 'name':
+            sorted.sort((a, b) => a.name.localeCompare(b.name));
+            break;
+        case 'size':
+            sorted.sort((a, b) => b.size - a.size);
+            break;
+        case 'date':
+            sorted.sort((a, b) => (b.modified || 0) - (a.modified || 0));
+            break;
+    }
+    
+    return sorted;
+}
+
+// Render folder videos in detail view
+function renderFolderVideos(videos) {
+    const grid = document.getElementById('folderDetailGrid');
+    if (!grid) return;
+    
+    grid.innerHTML = '';
+    
+    videos.forEach((video, idx) => {
+        const card = document.createElement('div');
+        card.className = 'video-card';
+        const thumbId = `detail_thumb_${idx}`;
+        
+        // Format size
+        const sizeM = (video.size / (1024 * 1024)).toFixed(1);
+        
+        card.innerHTML = `
+            <div class="video-thumbnail local-video-thumbnail" id="${thumbId}">
+                <i class="fas fa-file-video" style="font-size: 3rem;"></i>
+                <div class="duration-badge">${video.ext}</div>
+            </div>
+            <div class="video-card-content">
+                <h3 class="video-card-title">${video.name}</h3>
+                <div class="video-card-meta">
+                    <span class="channel-badge" style="background: #374151">
+                        <i class="fas fa-hdd"></i> ${sizeM} MB
+                    </span>
+                </div>
+            </div>
+        `;
+        
+        card.addEventListener('click', () => playLocalVideo(video));
+        grid.appendChild(card);
+        
+        // Queue thumbnail generation
+        const thumbEl = document.getElementById(thumbId);
+        if (thumbEl) {
+            queueThumbnailGeneration(video.path, thumbEl);
+        }
+    });
+}
+
+// Back to folders button
+document.addEventListener('DOMContentLoaded', () => {
+    const backBtn = document.getElementById('backToLocalFolders');
+    if (backBtn) {
+        backBtn.addEventListener('click', () => {
+            document.getElementById('localFolderDetailPage').style.display = 'none';
+            document.getElementById('localPage').style.display = 'block';
+        });
+    }
+});
+
+// Toggle folder collapse
+
+// Thumbnail generation queue to prevent lag
+let thumbnailQueue = [];
+let isProcessingThumbnails = false;
+const MAX_CONCURRENT_THUMBNAILS = 2;
+let activeThumbnails = 0;
+
+async function processThumbnailQueue() {
+    if (isProcessingThumbnails || thumbnailQueue.length === 0 || activeThumbnails >= MAX_CONCURRENT_THUMBNAILS) {
+        return;
+    }
+    
+    isProcessingThumbnails = true;
+    
+    while (thumbnailQueue.length > 0 && activeThumbnails < MAX_CONCURRENT_THUMBNAILS) {
+        const item = thumbnailQueue.shift();
+        activeThumbnails++;
+        generateLocalThumbnail(item.videoPath, item.thumbnailElement).finally(() => {
+            activeThumbnails--;
+            processThumbnailQueue();
+        });
+    }
+    
+    isProcessingThumbnails = false;
+}
+
+function queueThumbnailGeneration(videoPath, thumbnailElement) {
+    thumbnailQueue.push({ videoPath, thumbnailElement });
+    processThumbnailQueue();
+}
+
+// Generate thumbnail from local video
+async function generateLocalThumbnail(videoPath, thumbnailElement) {
+    return new Promise((resolve) => {
+        try {
+            const cachedThumb = localStorage.getItem(`local_thumb_${videoPath}`);
+            if (cachedThumb) {
+                thumbnailElement.style.backgroundImage = `url(${cachedThumb})`;
+                thumbnailElement.innerHTML = '';
+                resolve();
+                return;
+            }
+            
+            const video = document.createElement('video');
+            video.muted = true;
+            video.preload = 'metadata';
+            video.src = `file://${videoPath}`;
+            
+            let cleaned = false;
+            const cleanup = () => {
+                if (!cleaned) {
+                    cleaned = true;
+                    video.src = '';
+                    video.load();
+                    video.remove();
+                }
+            };
+            
+            const timeout = setTimeout(() => {
+                console.log('Thumbnail generation timeout for:', videoPath);
+                cleanup();
+                resolve();
+            }, 10000);
+            
+            video.addEventListener('loadeddata', () => {
+                video.currentTime = Math.min(5, video.duration * 0.1);
+            });
+            
+            video.addEventListener('seeked', () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 320;
+                    canvas.height = 180;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0, 320, 180);
+                    const thumbnail = canvas.toDataURL('image/jpeg', 0.6);
+                    
+                    thumbnailElement.style.backgroundImage = `url(${thumbnail})`;
+                    thumbnailElement.innerHTML = '';
+                    
+                    // Cache it
+                    try {
+                        localStorage.setItem(`local_thumb_${videoPath}`, thumbnail);
+                    } catch (e) {
+                        console.warn('Could not cache thumbnail - storage full?');
+                    }
+                } catch (e) {
+                    console.error('Local thumbnail error:', e);
+                }
+                
+                clearTimeout(timeout);
+                cleanup();
+                resolve();
+            });
+            
+            video.addEventListener('error', () => {
+                console.log('Could not generate thumbnail for:', videoPath);
+                clearTimeout(timeout);
+                cleanup();
+                resolve();
+            });
+        } catch (e) {
+            console.error('Generate thumbnail error:', e);
+            resolve();
+        }
+    });
+}
+
+window.removeLocalFolder = function(path) {
+    console.log('Removing folder:', path);
+    localFolders = localFolders.filter(f => f !== path);
+    saveLocalFolders();
+    loadLocalVideosPage();
+};
+
+function playLocalVideo(video) {
+    try {
+        console.log('Playing local video:', video.name);
+        if (!videoModal || !videoPlayer) return;
+        
+        videoModal.classList.add('active');
+        
+        const videoTitle = document.getElementById('videoTitle');
+        const videoChannel = document.getElementById('videoChannel');
+        const videoDescription = document.getElementById('videoDescription');
+        
+        if (videoTitle) videoTitle.textContent = video.name;
+        if (videoChannel) {
+            videoChannel.textContent = 'Lokal';
+            videoChannel.style.background = '#374151';
+        }
+        if (videoDescription) videoDescription.textContent = video.path;
+        
+        videoPlayer.src = `file://${video.path}`;
+        videoPlayer.play();
+    } catch (error) {
+        console.error('Play local video error:', error);
+        alert('Fehler beim Laden: ' + error.message);
+    }
+}
+
+// ===== SETTINGS =====
+function loadSettings() {
+    console.log('Loading settings...');
+    useRealThumbnails = localStorage.getItem('useRealThumbnails') === 'true';
+    const settingRealThumbnails = document.getElementById('settingRealThumbnails');
+    const realThumbnailsToggle = document.getElementById('realThumbnailsToggle');
+    if (settingRealThumbnails) settingRealThumbnails.checked = useRealThumbnails;
+    if (realThumbnailsToggle) realThumbnailsToggle.checked = useRealThumbnails;
+    console.log('Settings loaded:', { useRealThumbnails });
+}
+
+function saveSettings() {
+    localStorage.setItem('useRealThumbnails', useRealThumbnails);
+    console.log('Settings saved:', { useRealThumbnails });
+}
+
+// ===== NAVIGATION =====
+window.navigateToPage = function(page) {
+    console.log('navigateToPage:', page);
+    
+    const mainVideoSection = document.getElementById('mainVideoSection');
+    const historyPage = document.getElementById('historyPage');
+    const recentlyWatched = document.getElementById('recentlyWatched');
+    const livePage = document.getElementById('livePage');
+    const localPage = document.getElementById('localPage');
+    const settingsPage = document.getElementById('settingsPage');
+    const seriesDetailPage = document.getElementById('seriesDetailPage');
+    const localFolderDetailPage = document.getElementById('localFolderDetailPage');
+    
+    // Hide all pages including detail pages
+    if (mainVideoSection) mainVideoSection.style.display = 'none';
+    if (historyPage) historyPage.style.display = 'none';
+    if (recentlyWatched) recentlyWatched.style.display = 'none';
+    if (livePage) livePage.style.display = 'none';
+    if (localPage) localPage.style.display = 'none';
+    if (settingsPage) settingsPage.style.display = 'none';
+    if (seriesDetailPage) seriesDetailPage.style.display = 'none';
+    if (localFolderDetailPage) localFolderDetailPage.style.display = 'none';
+    
+    // Show requested
+    if (page === 'home') {
+        if (mainVideoSection) mainVideoSection.style.display = 'block';
+        if (recentlyWatched) recentlyWatched.style.display = 'block';
+        loadDefaultContent();
+        loadRecentlyWatched();
+    } else if (page === 'history') {
+        if (historyPage) historyPage.style.display = 'block';
+        loadFullHistoryPage();
+    } else if (page === 'live') {
+        if (livePage) livePage.style.display = 'block';
+        loadLiveChannels();
+    } else if (page === 'local') {
+        if (localPage) localPage.style.display = 'block';
+        loadLocalVideosPage();
+    } else if (page === 'settings') {
+        if (settingsPage) settingsPage.style.display = 'block';
+        loadSettings();
+    }
+    
+    console.log('Page navigated to:', page);
+};
+
+// ===== TOGGLE DESCRIPTION =====
+window.toggleModalDesc = function(btn) {
+    const descId = btn.dataset.descId;
+    const fullDesc = decodeURIComponent(btn.dataset.full);
+    const shortDesc = decodeURIComponent(btn.dataset.short);
+    const descText = document.getElementById(descId);
+    
+    if (btn.textContent.includes('Mehr')) {
+        if (descText) descText.textContent = fullDesc;
+        btn.textContent = 'Weniger anzeigen';
+    } else {
+        if (descText) descText.textContent = shortDesc;
+        btn.textContent = 'Mehr anzeigen';
+    }
+};
+
+console.log('All features loaded!');
+
+// ===== VIDEO FRAME CAPTURE für echte Thumbnails =====
+async function captureVideoFrame(videoUrl) {
+    return new Promise((resolve) => {
+        const video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        video.muted = true;
+        video.preload = 'metadata';
+        video.src = videoUrl;
+        
+        let cleaned = false;
+        const cleanup = () => {
+            if (!cleaned) {
+                cleaned = true;
+                video.src = '';
+                video.load();
+                video.remove();
+            }
+        };
+        
+        const timeout = setTimeout(() => {
+            cleanup();
+            resolve(null);
+        }, 5000);
+        
+        video.addEventListener('loadeddata', () => {
+            // Seek to 5 seconds (or 10% of video)
+            video.currentTime = Math.min(5, video.duration * 0.1);
+        });
+        
+        video.addEventListener('seeked', () => {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 320;
+                canvas.height = 180;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, 320, 180);
+                const thumbnail = canvas.toDataURL('image/jpeg', 0.7);
+                clearTimeout(timeout);
+                cleanup();
+                resolve(thumbnail);
+            } catch (e) {
+                console.error('Frame capture error:', e);
+                clearTimeout(timeout);
+                cleanup();
+                resolve(null);
+            }
+        });
+        
+        video.addEventListener('error', () => {
+            clearTimeout(timeout);
+            cleanup();
+            resolve(null);
+        });
+    });
+}
+
+// Cache for captured frames
+const frameCache = new Map();
+
+async function loadRealThumbnail(item, thumbnailElement) {
+    if (!useRealThumbnails) return;
+    if (!item.url_video && !item.url_video_low) return;
+    
+    const videoUrl = item.url_video_low || item.url_video;
+    const cacheKey = `frame_${item.title}_${item.channel}`;
+    
+    // Check cache first
+    if (frameCache.has(cacheKey)) {
+        thumbnailElement.style.backgroundImage = `url(${frameCache.get(cacheKey)})`;
+        return;
+    }
+    
+    // Check localStorage
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+        thumbnailElement.style.backgroundImage = `url(${cached})`;
+        frameCache.set(cacheKey, cached);
+        return;
+    }
+    
+    // Capture new frame
+    console.log('Capturing frame for:', item.title);
+    const frame = await captureVideoFrame(videoUrl);
+    
+    if (frame) {
+        thumbnailElement.style.backgroundImage = `url(${frame})`;
+        frameCache.set(cacheKey, frame);
+        // Save to localStorage (limit to 50 thumbnails)
+        try {
+            localStorage.setItem(cacheKey, frame);
+        } catch (e) {
+            // Storage full, clear old entries
+            console.warn('Storage full, clearing old thumbnails');
+        }
+    }
+}
+
+console.log('Video frame capture loaded!');
+
+// ===== TMDB API INTEGRATION =====
+const TMDB_API_KEY = 'YOUR_API_KEY_HERE'; // User needs to add their own key
+const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
+
+// Cache for TMDB series data
+const tmdbSeriesCache = new Map();
+
+// Search for a series on TMDB
+async function searchTMDBSeries(seriesName) {
+    // Check if API key is configured
+    if (TMDB_API_KEY === 'YOUR_API_KEY_HERE') {
+        console.log('TMDB API key not configured');
+        return null;
+    }
+    
+    // Check cache
+    const cacheKey = `search_${seriesName.toLowerCase()}`;
+    if (tmdbSeriesCache.has(cacheKey)) {
+        return tmdbSeriesCache.get(cacheKey);
+    }
+    
+    try {
+        const url = `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&language=de-DE&query=${encodeURIComponent(seriesName)}`;
+        console.log('Searching TMDB for:', seriesName);
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+            console.error('TMDB search failed:', response.status);
+            return null;
+        }
+        
+        const data = await response.json();
+        
+        if (data.results && data.results.length > 0) {
+            const series = data.results[0]; // Take first result
+            console.log('Found TMDB series:', series.name, 'ID:', series.id);
+            
+            // Cache the result
+            tmdbSeriesCache.set(cacheKey, series);
+            return series;
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('TMDB search error:', error);
+        return null;
+    }
+}
+
+// Get detailed series information from TMDB
+async function getTMDBSeriesDetails(seriesId) {
+    // Check if API key is configured
+    if (TMDB_API_KEY === 'YOUR_API_KEY_HERE') {
+        return null;
+    }
+    
+    // Check cache
+    const cacheKey = `details_${seriesId}`;
+    if (tmdbSeriesCache.has(cacheKey)) {
+        return tmdbSeriesCache.get(cacheKey);
+    }
+    
+    try {
+        const url = `${TMDB_BASE_URL}/tv/${seriesId}?api_key=${TMDB_API_KEY}&language=de-DE`;
+        console.log('Fetching TMDB details for ID:', seriesId);
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+            console.error('TMDB details failed:', response.status);
+            return null;
+        }
+        
+        const data = await response.json();
+        console.log('Got TMDB details:', data.name);
+        
+        // Cache the result
+        tmdbSeriesCache.set(cacheKey, data);
+        return data;
+    } catch (error) {
+        console.error('TMDB details error:', error);
+        return null;
+    }
+}
+
+// Get TMDB poster URL
+function getTMDBPosterURL(posterPath, size = 'w500') {
+    if (!posterPath) return null;
+    return `${TMDB_IMAGE_BASE}/${size}${posterPath}`;
+}
+
+// Get TMDB backdrop URL
+function getTMDBBackdropURL(backdropPath, size = 'w1280') {
+    if (!backdropPath) return null;
+    return `${TMDB_IMAGE_BASE}/${size}${backdropPath}`;
+}
+
+console.log('TMDB API integration loaded (configure API key to enable)!');

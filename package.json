@@ -1,0 +1,44 @@
+{
+  "name": "streamhub",
+  "version": "3.0.0",
+  "description": "Moderne Mediathek-App für deutsche Sender",
+  "main": "main.js",
+  "author": {
+    "name": "BrawlLaunchChannel",
+    "email": "dontmessagemelol@example.com"
+  },
+  "homepage": "https://github.com/brawllaunchchannel22/streamhub",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brawllaunchchannel22/streamhub.git"
+  },
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build:deb": "electron-builder --linux deb",
+    "build:appimage": "electron-builder --linux AppImage",
+    "build": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^28.3.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.streamhub.app",
+    "productName": "StreamHub",
+    "linux": {
+      "target": [
+        "deb",
+        "AppImage"
+      ],
+      "category": "Video",
+      "maintainer": "BrawlLaunchChannel <brawllaunchchannel@example.com>"
+    },
+    "files": [
+      "**/*",
+      "!dist/*",
+      "!node_modules/*/.cache"
+    ]
+  }
+}
