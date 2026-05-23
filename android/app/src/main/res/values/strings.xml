@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">StreamHub</string>
+    <string name="title_activity_main">StreamHub</string>
+    <string name="package_name">de.streamhub.app</string>
+    <string name="custom_url_scheme">de.streamhub.app</string>
+</resources>
