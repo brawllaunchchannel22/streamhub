@@ -26,7 +26,7 @@ Stelle sicher, dass **Node.js** (v18+) und **npm** auf deinem Linux-System insta
 
 1. **Repository klonen / herunterladen:**
    ```bash
-   git clone https://github.com/DEIN_GITHUB_NAME/streamhub.git
+   git clone https://github.com/brawllaunchchannel22/streamhub.git
    cd streamhub
    ```
 
