@@ -1649,3 +1649,102 @@ body {
     }
 }
 
+/* Mobile Optimizations (Screens <= 576px) */
+@media (max-width: 576px) {
+    .navbar {
+        padding: 0 0.75rem;
+    }
+    
+    .nav-container {
+        height: 60px;
+    }
+    
+    .nav-left {
+        gap: 0.75rem;
+    }
+    
+    .logo span {
+        display: none; /* Hide logo text, only show icon on very small screens */
+    }
+    
+    .logo i {
+        font-size: 1.6rem;
+    }
+    
+    .search-box {
+        width: 160px;
+        padding: 0.4rem 0.6rem;
+    }
+    
+    .search-box input {
+        font-size: 0.85rem;
+    }
+    
+    .main-content {
+        padding: 1rem 0.75rem;
+    }
+    
+    /* Fullscreen Modals on Mobile */
+    .modal-content {
+        margin: 0;
+        max-width: 100%;
+        width: 100%;
+        height: 100vh;
+        max-height: 100vh;
+        border-radius: 0;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .video-player-container video {
+        max-height: 40vh;
+    }
+    
+    .video-details {
+        padding: 1.25rem;
+        flex: 1;
+        overflow-y: auto;
+    }
+    
+    .video-meta h2 {
+        font-size: 1.3rem;
+    }
+    
+    .video-actions {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .action-btn {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    /* Smaller cards on mobile */
+    .video-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.75rem;
+    }
+    
+    /* Settings Form Row adjustments */
+    .tmdb-key-row {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .btn-primary-inline {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    /* Make Hamburger menu a bit narrower on mobile */
+    .hamburger-sidebar {
+        width: 260px;
+    }
+    
+    /* Episode cards layout inside series details modal */
+    .episodes-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+
