@@ -5,6 +5,7 @@ StreamHub ist ein moderner, performanter und optisch ansprechender Mediathek-Cli
 ![Version](https://img.shields.io/badge/Version-3.0.0-blue.svg?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/Platform-Linux-orange.svg?style=for-the-badge)
+![Platform](https://img.shields.io/badge/Platform-Android-3DDC84.svg?style=for-the-badge&logo=android&logoColor=white)
 
 ---
 
