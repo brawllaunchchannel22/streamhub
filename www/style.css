@@ -1,5 +1,5 @@
 :root {
-    --primary-color: #6366f1; /* Electric indigo/purple */
+    --primary-color: #6366f1;
     --primary-hover: #4f46e5;
     --primary-gradient: linear-gradient(135deg, #6366f1, #a855f7, #ec4899);
     --background: #09090b;
@@ -15,6 +15,39 @@
     --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
     --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
     --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.6);
+
+    /* M3 Expressive — Motion Tokens */
+    --m3-easing-standard:          cubic-bezier(0.2,  0,    0,    1.0);
+    --m3-easing-emphasized:        cubic-bezier(0.2,  0,    0,    1.0);
+    --m3-easing-decelerate:        cubic-bezier(0.05, 0.7,  0.1,  1.0);
+    --m3-easing-accelerate:        cubic-bezier(0.3,  0,    0.8,  0.15);
+    --m3-easing-spring:            cubic-bezier(0.34, 1.56, 0.64, 1);
+    --m3-easing-spring-fast:       cubic-bezier(0.34, 1.8,  0.64, 1);
+    --m3-duration-short1: 50ms;   --m3-duration-short2: 100ms;
+    --m3-duration-short3: 150ms;  --m3-duration-short4: 200ms;
+    --m3-duration-medium1: 250ms; --m3-duration-medium2: 300ms;
+    --m3-duration-medium3: 350ms; --m3-duration-medium4: 400ms;
+    --m3-duration-long1:  450ms;  --m3-duration-long2:  500ms;
+
+    /* M3 Expressive — Tonal Containers (dark scheme) */
+    --m3-primary-container:        rgba(99, 102, 241, 0.15);
+    --m3-primary-container-hover:  rgba(99, 102, 241, 0.22);
+    --m3-on-primary-container:     #c7c8ff;
+    --m3-secondary-container:      rgba(168, 85, 247, 0.12);
+    --m3-tertiary-container:       rgba(236, 72, 153, 0.10);
+    --m3-surface-container:        rgba(255, 255, 255, 0.04);
+    --m3-surface-container-high:   rgba(255, 255, 255, 0.07);
+    --m3-surface-container-highest:rgba(255, 255, 255, 0.11);
+    --m3-outline:                  rgba(255, 255, 255, 0.12);
+    --m3-outline-variant:          rgba(255, 255, 255, 0.06);
+
+    /* M3 Shape Scale */
+    --m3-shape-xs:     4px;
+    --m3-shape-sm:     8px;
+    --m3-shape-md:    12px;
+    --m3-shape-lg:    16px;
+    --m3-shape-xl:    28px;
+    --m3-shape-full: 100px;
 }
 
 * {
@@ -62,9 +95,7 @@ body {
 
 /* Navbar */
 .navbar {
-    background: rgba(9, 9, 11, 0.7);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: #131316;
     border-bottom: 1px solid var(--border-color);
     position: sticky;
     top: 0;
@@ -171,10 +202,10 @@ body {
 .search-box {
     display: flex;
     align-items: center;
-    background: var(--surface);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 0.5rem 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 100px;
+    padding: 0.5rem 1.25rem;
     width: 350px;
     transition: all 0.3s;
 }
@@ -217,69 +248,176 @@ body {
     border-color: var(--primary-color);
 }
 
-/* Filter Sidebar */
+/* Filter Sidebar — GPU-composited via transform (no layout reflow = no lag) */
 .filter-sidebar {
     position: fixed;
-    right: -350px;
+    right: 0;
     top: 0;
-    width: 350px;
+    width: min(350px, 85vw);
     height: 100vh;
-    background: var(--surface);
-    border-left: 1px solid var(--border-color);
+    background: #121214;
+    border-left: 1px solid rgba(255,255,255,0.06);
+    border-radius: 28px 0 0 28px;
     z-index: 1100;
-    transition: right 0.3s ease;
+    transform: translateX(110%);
+    transition: transform 0.45s cubic-bezier(0.05, 0.7, 0.1, 1.0),
+                box-shadow 0.45s ease;
     overflow-y: auto;
+    will-change: transform;
+    overscroll-behavior: contain;
 }
 
 .filter-sidebar.active {
-    right: 0;
-    box-shadow: -5px 0 25px rgba(0,0,0,0.5);
+    transform: translateX(0);
+    box-shadow: -16px 0 48px rgba(0, 0, 0, 0.85);
 }
 
-/* Hamburger Sidebar */
+/* Hamburger Sidebar — GPU-composited via transform */
 .hamburger-sidebar {
     position: fixed;
-    left: -350px;
+    left: 0;
     top: 0;
-    width: 350px;
+    width: min(320px, 82vw);
     height: 100vh;
-    background: var(--surface);
-    border-right: 1px solid var(--border-color);
+    background: #121214;
+    border-right: 1px solid rgba(255,255,255,0.06);
+    border-radius: 0 28px 28px 0;
     z-index: 1100;
-    transition: left 0.3s ease;
+    transform: translateX(-110%);
+    transition: transform 0.45s cubic-bezier(0.05, 0.7, 0.1, 1.0),
+                box-shadow 0.45s ease;
     overflow-y: auto;
+    will-change: transform;
+    overscroll-behavior: contain;
 }
 
 .hamburger-sidebar.active {
-    left: 0;
-    box-shadow: 5px 0 25px rgba(0,0,0,0.5);
+    transform: translateX(0);
+    box-shadow: 16px 0 48px rgba(0, 0, 0, 0.85);
 }
 
 .hamburger-content {
-    padding: 1rem;
+    padding: 1.5rem;
 }
 
 .hamburger-item {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 1rem;
-    color: var(--text-primary);
+    gap: 0.875rem;
+    padding: 0.875rem 1.25rem;
+    color: var(--text-secondary);
     text-decoration: none;
-    border-radius: 8px;
-    transition: all 0.3s;
-    font-size: 1rem;
+    border-radius: 12px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    position: relative;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+    transition: background var(--m3-duration-short3) var(--m3-easing-emphasized),
+                color var(--m3-duration-short3) var(--m3-easing-emphasized),
+                transform var(--m3-duration-short3) var(--m3-easing-emphasized),
+                box-shadow var(--m3-duration-short3) var(--m3-easing-emphasized);
+}
+
+.hamburger-item::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.3) 0%, transparent 70%);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width var(--m3-duration-short4) ease, height var(--m3-duration-short4) ease;
+}
+
+.hamburger-item:active::before {
+    width: 200px;
+    height: 200px;
 }
 
 .hamburger-item:hover {
-    background: var(--surface-light);
-    color: var(--primary-color);
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--text-primary);
+    transform: translateX(8px);
+    box-shadow: inset 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
 .hamburger-item i {
-    width: 24px;
+    font-size: 1.1rem;
+    transition: transform var(--m3-duration-short3) var(--m3-easing-emphasized);
+}
+
+.hamburger-item:hover i {
+    transform: scale(1.2);
+}
+
+.hamburger-item:active {
+    transform: scale(0.96);
+}
+
+.hamburger-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+/* M3 active page indicator pill */
+.hamburger-item.active-page {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.hamburger-item i {
+    width: 22px;
     text-align: center;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.hamburger-item:hover i,
+.hamburger-item.active-page i {
+    transform: scale(1.2);
+}
+
+/* Sidebar Backdrop Overlay — NO blur to avoid WebView lag */
+.sidebar-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 1090;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s var(--m3-easing-standard);
+}
+
+.sidebar-backdrop.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* M3 Expressive — Stagger nav items with spring physics (GPU transform only) */
+.hamburger-sidebar.active .hamburger-item {
+    animation: m3NavItemIn 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.hamburger-sidebar.active .hamburger-item:nth-child(1) { animation-delay: 0.03s; }
+.hamburger-sidebar.active .hamburger-item:nth-child(2) { animation-delay: 0.07s; }
+.hamburger-sidebar.active .hamburger-item:nth-child(3) { animation-delay: 0.11s; }
+.hamburger-sidebar.active .hamburger-item:nth-child(4) { animation-delay: 0.15s; }
+.hamburger-sidebar.active .hamburger-item:nth-child(5) { animation-delay: 0.19s; }
+.hamburger-sidebar.active .hamburger-item:nth-child(6) { animation-delay: 0.23s; }
+.hamburger-sidebar.active .hamburger-item:nth-child(7) { animation-delay: 0.27s; }
+.hamburger-sidebar.active .hamburger-item:nth-child(8) { animation-delay: 0.31s; }
+
+@keyframes m3NavItemIn {
+    from { opacity: 0; transform: translateX(-18px) scale(0.95); }
+    to   { opacity: 1; transform: translateX(0)    scale(1);    }
 }
 
 .hamburger-divider {
@@ -334,7 +472,9 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 1.5rem;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 2px solid var(--primary-color);
+    background: rgba(99, 102, 241, 0.06);
+    transition: background var(--m3-duration-short4) ease;
 }
 
 .filter-header h3 {
@@ -342,60 +482,128 @@ body {
     align-items: center;
     gap: 0.5rem;
     font-size: 1.2rem;
+    background: var(--primary-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .close-btn {
-    background: none;
-    border: none;
-    color: var(--text-secondary);
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    color: var(--primary-color);
     font-size: 1.5rem;
     cursor: pointer;
-    transition: color 0.3s;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: all var(--m3-duration-short3) var(--m3-easing-emphasized);
 }
 
 .close-btn:hover {
     color: var(--text-primary);
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    transform: rotate(90deg) scale(1.1);
+    box-shadow: var(--shadow-sm);
+}
+
+.close-btn:active {
+    transform: rotate(90deg) scale(0.95);
 }
 
 .filter-content {
-    padding: 1.5rem;
+    padding: 1.25rem;
 }
 
 .filter-section {
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.25rem;
 }
 
 .filter-section label {
     display: block;
-    color: var(--text-secondary);
-    font-size: 0.9rem;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
+    color: var(--primary-color);
+    font-size: 0.85rem;
+    margin-bottom: 0.4rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    transition: color var(--m3-duration-short4) ease;
 }
 
 .filter-section select {
     width: 100%;
-    background: var(--background);
-    border: 1px solid var(--border-color);
+    background: rgba(99, 102, 241, 0.08);
+    border: 2px solid var(--m3-outline);
     color: var(--text-primary);
-    padding: 0.75rem;
-    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    border-radius: var(--m3-shape-md);
     font-size: 0.95rem;
+    font-weight: 500;
     cursor: pointer;
-    transition: all 0.3s;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236366f1' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2.5rem;
+    transition: border-color var(--m3-duration-short4) var(--m3-easing-standard),
+                background var(--m3-duration-short4) var(--m3-easing-standard),
+                box-shadow var(--m3-duration-short4) var(--m3-easing-standard),
+                transform var(--m3-duration-short3) var(--m3-easing-emphasized);
+    transform-origin: center;
 }
 
+.filter-section select:hover {
+    border-color: var(--primary-color);
+    background-color: rgba(99, 102, 241, 0.12);
+    transform: scale(1.01);
+}
+
+.filter-section select:active,
 .filter-section select:focus {
     outline: none;
     border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+    background-color: rgba(99, 102, 241, 0.15);
+    transform: scale(1.02);
+}
+
+.filter-section select option {
+    background: #1e1e22;
+    color: var(--text-primary);
+}
+
+.checkbox-label {
+    display: flex !important;
+    align-items: center;
+    gap: 0.5rem;
+    flex-direction: row !important;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    accent-color: var(--primary-color);
+    width: 18px;
+    height: 18px;
+}
+
+.checkbox-label span {
+    text-transform: none;
+    font-weight: 400;
+    font-size: 0.9rem;
+    color: var(--text-primary);
 }
 
 /* Buttons */
 .btn-primary, .btn-secondary {
     width: 100%;
-    padding: 0.75rem;
+    padding: 0.75rem 1.5rem;
     border: none;
-    border-radius: 8px;
+    border-radius: 100px;
     font-size: 0.95rem;
     font-weight: 600;
     cursor: pointer;
@@ -542,7 +750,7 @@ body {
     background: var(--surface-glass);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border-radius: 16px;
+    border-radius: 24px;
     overflow: hidden;
     cursor: pointer;
     transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
@@ -885,7 +1093,7 @@ body {
     position: relative;
     max-width: 1200px;
     margin: 2rem auto;
-    background: var(--surface);
+    background: #131316;
     border-radius: 16px;
     overflow: hidden;
     animation: modalSlideIn 0.3s ease;
@@ -975,7 +1183,7 @@ body {
     background: var(--surface-light);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
-    border-radius: 8px;
+    border-radius: 100px;
     cursor: pointer;
     font-size: 0.95rem;
     display: flex;
@@ -994,10 +1202,10 @@ body {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.75rem 1rem;
+    padding: 0.75rem 1.25rem;
     background: var(--surface-light);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: 100px;
 }
 
 .quality-selector-container label {
@@ -1013,8 +1221,8 @@ body {
     background: var(--background);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
-    padding: 0.5rem;
-    border-radius: 6px;
+    padding: 0.35rem 1rem;
+    border-radius: 100px;
     font-size: 0.9rem;
     cursor: pointer;
     transition: all 0.3s;
@@ -1505,23 +1713,46 @@ body {
 .btn-back {
     padding: 0.75rem 1.5rem;
     background: var(--surface);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
     color: var(--text-primary);
     font-size: 0.95rem;
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: 0.02em;
     cursor: pointer;
-    transition: all 0.3s;
+    transition: all var(--m3-duration-short3) var(--m3-easing-emphasized);
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-back::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: var(--primary-gradient);
+    z-index: -1;
+    transition: left var(--m3-duration-short4) var(--m3-easing-standard);
+}
+
+.btn-back:active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+    transform: scale(0.96);
 }
 
 .btn-back:hover {
     background: var(--primary-color);
     border-color: var(--primary-color);
     color: white;
-    transform: translateX(-4px);
+    transform: translateX(-8px) scale(1.02);
+    box-shadow: var(--shadow-md);
 }
 
 /* Series Info Container */
@@ -1652,11 +1883,14 @@ body {
 /* Mobile Optimizations (Screens <= 576px) */
 @media (max-width: 576px) {
     .navbar {
-        padding: 0 0.75rem;
+        padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
+        padding-bottom: 0.5rem;
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
     }
     
     .nav-container {
-        height: 60px;
+        height: 56px;
     }
     
     .nav-left {
@@ -1737,9 +1971,9 @@ body {
         justify-content: center;
     }
     
-    /* Make Hamburger menu a bit narrower on mobile */
+    /* Hamburger sidebar width on very small screens — use CSS min() */
     .hamburger-sidebar {
-        width: 260px;
+        width: min(280px, 82vw);
     }
     
     /* Episode cards layout inside series details modal */
@@ -1748,3 +1982,194 @@ body {
     }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   M3 EXPRESSIVE — Enhanced Component Styles
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Video Cards — M3 spring-physics hover with tonal elevation */
+.video-card {
+    transition: transform var(--m3-duration-medium2) var(--m3-easing-spring),
+                box-shadow var(--m3-duration-medium2) var(--m3-easing-standard),
+                border-color var(--m3-duration-short4) var(--m3-easing-standard);
+}
+
+.video-card:hover {
+    transform: translateY(-8px) scale(1.015);
+    box-shadow: var(--shadow-lg), 0 0 24px rgba(99, 102, 241, 0.15);
+    border-color: var(--m3-outline);
+}
+
+.video-card:active {
+    transform: scale(0.98);
+    transition-duration: var(--m3-duration-short3);
+}
+
+/* Touch ripple overlay for interactive elements (mobile) */
+.video-card::after,
+.action-btn::after,
+.btn-primary::after,
+.btn-secondary::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%),
+                rgba(255,255,255,0.12) 0%, transparent 70%);
+    opacity: 0;
+    transition: opacity var(--m3-duration-short3) var(--m3-easing-standard);
+    pointer-events: none;
+}
+
+.video-card:active::after,
+.action-btn:active::after,
+.btn-primary:active::after,
+.btn-secondary:active::after {
+    opacity: 1;
+}
+
+/* M3 Primary Button — tonal glow on hover */
+.btn-primary {
+    position: relative;
+    overflow: hidden;
+    transition: background var(--m3-duration-short4) var(--m3-easing-standard),
+                transform var(--m3-duration-short3) var(--m3-easing-spring),
+                box-shadow var(--m3-duration-medium1) var(--m3-easing-standard);
+}
+
+.btn-primary:hover {
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.35);
+}
+
+.btn-primary:active {
+    transform: scale(0.97);
+}
+
+/* M3 Action Buttons — spring press feedback */
+.action-btn {
+    position: relative;
+    overflow: hidden;
+    transition: background var(--m3-duration-short4) var(--m3-easing-standard),
+                border-color var(--m3-duration-short4) var(--m3-easing-standard),
+                transform var(--m3-duration-short3) var(--m3-easing-spring),
+                box-shadow var(--m3-duration-medium1) var(--m3-easing-standard);
+}
+
+.action-btn:active {
+    transform: scale(0.95);
+}
+
+/* M3 Close / Icon Buttons — tonal surface container */
+.close-btn {
+    background: var(--m3-surface-container-high);
+    border: 1px solid var(--m3-outline-variant);
+    color: var(--text-primary);
+    width: 40px;
+    height: 40px;
+    border-radius: var(--m3-shape-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    cursor: pointer;
+    transition: background var(--m3-duration-short4) var(--m3-easing-standard),
+                transform var(--m3-duration-short3) var(--m3-easing-spring);
+    -webkit-tap-highlight-color: transparent;
+}
+
+.close-btn:hover {
+    background: var(--m3-surface-container-highest);
+}
+
+.close-btn:active {
+    transform: scale(0.9);
+}
+
+/* M3 Filter / Sidebar Header */
+.filter-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.25rem 1.25rem 1rem;
+    border-bottom: 1px solid var(--m3-outline-variant);
+}
+
+.filter-header h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-primary);
+}
+
+/* M3 Hamburger Divider — subtle tonal separation */
+.hamburger-divider {
+    height: 1px;
+    background: var(--m3-outline-variant);
+    margin: 0.75rem 1rem;
+}
+
+/* M3 Icon Buttons (navbar) — tonal circle with spring press */
+.icon-btn {
+    transition: background var(--m3-duration-short4) var(--m3-easing-standard),
+                transform var(--m3-duration-short3) var(--m3-easing-spring),
+                border-color var(--m3-duration-short4) var(--m3-easing-standard);
+    -webkit-tap-highlight-color: transparent;
+}
+
+.icon-btn:active {
+    transform: scale(0.9);
+}
+
+/* M3 Search Box — focus glow with primary tint */
+.search-box:focus-within {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    background: rgba(255, 255, 255, 0.07);
+}
+
+/* M3 Nav Category Links — pill with spring press */
+.nav-categories a {
+    transition: background var(--m3-duration-short4) var(--m3-easing-standard),
+                color var(--m3-duration-short4) var(--m3-easing-standard),
+                transform var(--m3-duration-short3) var(--m3-easing-spring);
+    -webkit-tap-highlight-color: transparent;
+}
+
+.nav-categories a:active {
+    transform: scale(0.95);
+}
+
+.nav-categories a.active {
+    background: var(--m3-primary-container);
+    color: var(--m3-on-primary-container);
+}
+
+/* M3 Load More Button */
+#loadMore {
+    border-radius: var(--m3-shape-full);
+    transition: background var(--m3-duration-short4) var(--m3-easing-standard),
+                transform var(--m3-duration-short3) var(--m3-easing-spring);
+}
+
+#loadMore:active {
+    transform: scale(0.97);
+}
+
+/* M3 Expressive — Video Thumbnail Overlay Gradient */
+.video-thumbnail::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 40%;
+    background: linear-gradient(transparent, rgba(0,0,0,0.4));
+    pointer-events: none;
+    border-radius: 0 0 var(--m3-shape-xl) var(--m3-shape-xl);
+}
+
+/* M3 Global — Disable tap highlight everywhere */
+* {
+    -webkit-tap-highlight-color: transparent;
+}

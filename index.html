@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <title>StreamHub - Deutsche Mediatheken</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -34,9 +34,12 @@
                 </div>
             </div>
             <div class="nav-right">
-                <div class="search-box">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="searchInput" placeholder="Suche nach Sendungen, Themen...">
+                <div class="search-container">
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="searchInput" placeholder="Suche nach Sendungen, Themen...">
+                    </div>
+                    <div id="searchHistoryDropdown" class="search-history-dropdown"></div>
                 </div>
                 <button id="filterToggle" class="icon-btn" title="Filter">
                     <i class="fas fa-sliders-h"></i>
@@ -408,6 +411,9 @@
                         </label>
                         <select id="subtitleSelector" class="quality-selector"></select>
                     </div>
+                    <button id="pipBtn" class="action-btn" title="Bild-in-Bild">
+                        <i class="fas fa-window-restore"></i> PiP
+                    </button>
                     <button id="fullscreenBtn" class="action-btn">
                         <i class="fas fa-expand"></i> Vollbild
                     </button>
@@ -420,7 +426,8 @@
                 </div>
             </div>
         </div>
-    </div>
+    <!-- Sidebar Backdrop Overlay -->
+    <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
 
     <script src="renderer.js"></script>
 </body>

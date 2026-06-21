@@ -7,7 +7,7 @@ const API_URL = 'https://mediathekviewweb.de/api/query';
 // DOM Elements - Get them safely
 let searchInput, videoGrid, loadingState, emptyState, sectionTitle, resultsCount, loadMore;
 let videoModal, videoPlayer, closeModal, hamburgerMenu, closeHamburger, hamburgerSidebar;
-let filterToggle, filterSidebar, closeFilter, applyFilter, resetFilter;
+let filterToggle, filterSidebar, closeFilter, applyFilter, resetFilter, sidebarBackdrop;
 let recentlyWatched, recentGrid, clearHistory, showAllHistory;
 let hlsInstance = null;
 
@@ -25,6 +25,146 @@ let useRealThumbnails = true; // always on
 let thumbIdCounter = 0; // global unique ID for thumbnail elements
 let localFolders = [];
 let localVideos = [];
+
+// Global state for grouped display items
+let currentDisplayItems = [];
+let previousPage = 'home';
+
+// --- Suchverlauf (Search History) Helpers ---
+function getSearchHistory() {
+    try {
+        return JSON.parse(localStorage.getItem('streamhubSearchHistory') || '[]');
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveSearchQuery(query) {
+    if (!query || !query.trim()) return;
+    const cleanQuery = query.trim();
+    try {
+        let history = getSearchHistory();
+        history = history.filter(item => item.toLowerCase() !== cleanQuery.toLowerCase());
+        history.unshift(cleanQuery);
+        if (history.length > 10) {
+            history = history.slice(0, 10);
+        }
+        localStorage.setItem('streamhubSearchHistory', JSON.stringify(history));
+    } catch (e) {
+        console.error('Error saving search query:', e);
+    }
+}
+
+function removeSearchQuery(query) {
+    try {
+        let history = getSearchHistory();
+        history = history.filter(item => item.toLowerCase() !== query.toLowerCase());
+        localStorage.setItem('streamhubSearchHistory', JSON.stringify(history));
+    } catch (e) {
+        console.error('Error removing search query:', e);
+    }
+}
+
+function showSearchHistoryDropdown() {
+    const dropdown = document.getElementById('searchHistoryDropdown');
+    if (!dropdown) return;
+    
+    const history = getSearchHistory();
+    if (history.length === 0) {
+        dropdown.style.display = 'none';
+        return;
+    }
+    
+    dropdown.innerHTML = '';
+    history.forEach(query => {
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        item.innerHTML = `
+            <i class="fas fa-history"></i>
+            <span class="history-text" style="flex: 1;">${query}</span>
+            <button class="delete-history-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center; transition: color 0.2s;" title="Löschen">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        
+        // Handle click on text to search
+        item.querySelector('.history-text').addEventListener('click', () => {
+            if (searchInput) searchInput.value = query;
+            performSearch(query);
+            hideSearchHistoryDropdown();
+        });
+        
+        // Handle click on delete button
+        item.querySelector('.delete-history-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeSearchQuery(query);
+            showSearchHistoryDropdown(); // Refresh dropdown
+        });
+        
+        dropdown.appendChild(item);
+    });
+    
+    dropdown.style.display = 'block';
+}
+
+function hideSearchHistoryDropdown() {
+    const dropdown = document.getElementById('searchHistoryDropdown');
+    if (dropdown) {
+        dropdown.style.display = 'none';
+    }
+}
+
+// --- Wiedergabefortschritt (Playback Progress) Helpers ---
+function getVideoProgressKey(item) {
+    if (!item) return '';
+    if (item.title && item.channel && item.timestamp) {
+        try {
+            return `${item.channel}_${item.timestamp}_${btoa(unescape(encodeURIComponent(item.title))).substring(0, 32)}`;
+        } catch (e) {
+            return `${item.channel}_${item.timestamp}_${item.title.replace(/[^a-zA-Z0-9]/g, '').substring(0, 32)}`;
+        }
+    }
+    return item.url_video || item.url_video_low || item.url_video_hd || '';
+}
+
+function saveVideoProgress(url, currentTime, duration) {
+    try {
+        const progressMap = JSON.parse(localStorage.getItem('videoProgressMap') || '{}');
+        progressMap[url] = {
+            currentTime: currentTime,
+            duration: duration,
+            percent: Math.round((currentTime / duration) * 100),
+            timestamp: Date.now()
+        };
+        const keys = Object.keys(progressMap);
+        if (keys.length > 100) {
+            const sorted = keys.sort((a, b) => progressMap[a].timestamp - progressMap[b].timestamp);
+            delete progressMap[sorted[0]];
+        }
+        localStorage.setItem('videoProgressMap', JSON.stringify(progressMap));
+    } catch (e) {
+        console.error('Error saving progress:', e);
+    }
+}
+
+function getVideoProgress(url) {
+    try {
+        const progressMap = JSON.parse(localStorage.getItem('videoProgressMap') || '{}');
+        return progressMap[url] || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function removeVideoProgress(url) {
+    try {
+        const progressMap = JSON.parse(localStorage.getItem('videoProgressMap') || '{}');
+        if (progressMap[url]) {
+            delete progressMap[url];
+            localStorage.setItem('videoProgressMap', JSON.stringify(progressMap));
+        }
+    } catch (e) {}
+}
 
 // Sender Colors
 const senderColors = {
@@ -73,9 +213,148 @@ function init() {
         recentlyWatched = document.getElementById('recentlyWatched');
         recentGrid = document.getElementById('recentGrid');
         clearHistory = document.getElementById('clearHistory');
-        showAllHistory = document.getElementById('showAllHistory');
+                showAllHistory = document.getElementById('showAllHistory');
+        sidebarBackdrop = document.getElementById('sidebarBackdrop');
         
         console.log('DOM elements loaded');
+        
+        // Apply Android Native Theme colors if available (Material You Dynamic Color)
+        if (window.AndroidNativeTheme && typeof window.AndroidNativeTheme.getSystemColors === 'function') {
+            try {
+                const colorsJson = window.AndroidNativeTheme.getSystemColors();
+                const colors = JSON.parse(colorsJson);
+                console.log('Retrieved Android Native Theme colors:', colors);
+                if (colors.primary) {
+                    document.documentElement.style.setProperty('--primary-color', colors.primary);
+                }
+                if (colors.primaryHover) {
+                    document.documentElement.style.setProperty('--primary-hover', colors.primaryHover);
+                }
+                if (colors.background) {
+                    document.documentElement.style.setProperty('--background', colors.background);
+                    document.body.style.backgroundColor = colors.background;
+                }
+                if (colors.surface) {
+                    const hexToRgb = (hex) => {
+                        var shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+                        hex = hex.replace(shorthandRegex, function(m, r, g, b) { return r + r + g + g + b + b; });
+                        var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                        return result ? parseInt(result[1], 16) + ',' + parseInt(result[2], 16) + ',' + parseInt(result[3], 16) : '24,24,27';
+                    };
+                    const rgbVal = hexToRgb(colors.surface);
+                    document.documentElement.style.setProperty('--surface', `rgba(${rgbVal}, 0.65)`);
+                    document.documentElement.style.setProperty('--surface-glass', `rgba(${rgbVal}, 0.45)`);
+                }
+                if (colors.surfaceLight) {
+                    const hexToRgb = (hex) => {
+                        var shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+                        hex = hex.replace(shorthandRegex, function(m, r, g, b) { return r + r + g + g + b + b; });
+                        var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                        return result ? parseInt(result[1], 16) + ',' + parseInt(result[2], 16) + ',' + parseInt(result[3], 16) : '39,39,42';
+                    };
+                    const rgbValLight = hexToRgb(colors.surfaceLight);
+                    document.documentElement.style.setProperty('--surface-light', `rgba(${rgbValLight}, 0.8)`);
+                }
+                // Map accent2/accent3 to M3 secondary/tertiary containers
+                if (colors.accent2) {
+                    const hexToRgb = (hex) => {
+                        hex = hex.replace(/^#?([a-f\d])([a-f\d])([a-f\d])$/i, (m, r, g, b) => r+r+g+g+b+b);
+                        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                        return result ? `${parseInt(result[1],16)},${parseInt(result[2],16)},${parseInt(result[3],16)}` : '168,85,247';
+                    };
+                    document.documentElement.style.setProperty('--m3-secondary-container', `rgba(${hexToRgb(colors.accent2)}, 0.12)`);
+                }
+                if (colors.accent3) {
+                    const hexToRgb = (hex) => {
+                        hex = hex.replace(/^#?([a-f\d])([a-f\d])([a-f\d])$/i, (m, r, g, b) => r+r+g+g+b+b);
+                        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                        return result ? `${parseInt(result[1],16)},${parseInt(result[2],16)},${parseInt(result[3],16)}` : '236,72,153';
+                    };
+                    document.documentElement.style.setProperty('--m3-tertiary-container', `rgba(${hexToRgb(colors.accent3)}, 0.10)`);
+                }
+                // Update primary container to match dynamic primary
+                if (colors.primary) {
+                    const hexToRgb = (hex) => {
+                        hex = hex.replace(/^#?([a-f\d])([a-f\d])([a-f\d])$/i, (m, r, g, b) => r+r+g+g+b+b);
+                        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                        return result ? `${parseInt(result[1],16)},${parseInt(result[2],16)},${parseInt(result[3],16)}` : '99,102,241';
+                    };
+                    document.documentElement.style.setProperty('--m3-primary-container', `rgba(${hexToRgb(colors.primary)}, 0.15)`);
+                    document.documentElement.style.setProperty('--m3-primary-container-hover', `rgba(${hexToRgb(colors.primary)}, 0.22)`);
+                    document.documentElement.style.setProperty('--m3-on-primary-container', colors.primary);
+                    // Update gradient to use dynamic colors
+                    if (colors.accent3) {
+                        document.documentElement.style.setProperty('--primary-gradient',
+                            `linear-gradient(135deg, ${colors.primary}, ${colors.accent2 || colors.primary}, ${colors.accent3})`);
+                    }
+                }
+            } catch (error) {
+                console.error('Error applying dynamic colors:', error);
+            }
+        }
+
+        // ─── M3 Haptic Vibration Helper ─────────────────────────────────────────
+        // Provides tactile feedback for interactive elements
+        window._haptic = {
+            tick: () => {
+                try {
+                    if (window.AndroidNativeTheme && window.AndroidNativeTheme.hapticTick) {
+                        AndroidNativeTheme.hapticTick();
+                    } else if (navigator.vibrate) {
+                        navigator.vibrate(5);
+                    }
+                } catch(e) {}
+            },
+            heavy: () => {
+                try {
+                    if (window.AndroidNativeTheme && window.AndroidNativeTheme.hapticHeavy) {
+                        AndroidNativeTheme.hapticHeavy();
+                    } else if (navigator.vibrate) {
+                        navigator.vibrate(15);
+                    }
+                } catch(e) {}
+            }
+        };
+
+        // Attach haptic tick to all interactive elements (delegated)
+        document.addEventListener('touchstart', (e) => {
+            const el = e.target.closest('.hamburger-item, .video-card, .action-btn, .btn-primary, .btn-secondary, .btn-back, .icon-btn, .close-btn, .nav-categories a, #loadMore, .filter-section select, a[href], button');
+            if (el && window._haptic && typeof window._haptic.tick === 'function') window._haptic.tick();
+        }, { passive: true });
+
+        if (videoPlayer) {
+            videoPlayer.addEventListener('play', () => {
+                document.title = '[PLAYING] StreamHub';
+            });
+            videoPlayer.addEventListener('pause', () => {
+                document.title = 'StreamHub';
+            });
+            videoPlayer.addEventListener('ended', () => {
+                document.title = 'StreamHub';
+                // Remove progress when finished
+                if (window.currentPlayingVideo) {
+                    const key = getVideoProgressKey(window.currentPlayingVideo);
+                    if (key) removeVideoProgress(key);
+                }
+            });
+            videoPlayer.addEventListener('emptied', () => {
+                document.title = 'StreamHub';
+            });
+            videoPlayer.addEventListener('timeupdate', () => {
+                if (window.currentPlayingVideo && videoPlayer.duration) {
+                    const currentTime = videoPlayer.currentTime;
+                    const duration = videoPlayer.duration;
+                    const key = getVideoProgressKey(window.currentPlayingVideo);
+                    
+                    // Save progress if we are between 5 seconds and 15 seconds before the end
+                    if (key && currentTime > 5 && currentTime < duration - 15) {
+                        saveVideoProgress(key, currentTime, duration);
+                    } else if (key && currentTime >= duration - 15) {
+                        removeVideoProgress(key);
+                    }
+                }
+            });
+        }
         
         // Load settings and data
         console.log('Loading settings...');
@@ -103,6 +382,24 @@ function attachEventListeners() {
         searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && searchInput.value.trim()) {
                 performSearch(searchInput.value.trim());
+            }
+        });
+
+        searchInput.addEventListener('focus', showSearchHistoryDropdown);
+
+        searchInput.addEventListener('input', () => {
+            if (!searchInput.value.trim()) {
+                showSearchHistoryDropdown();
+            } else {
+                hideSearchHistoryDropdown();
+            }
+        });
+
+        // Hide dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const dropdown = document.getElementById('searchHistoryDropdown');
+            if (dropdown && searchInput && !searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+                hideSearchHistoryDropdown();
             }
         });
     }
@@ -152,13 +449,20 @@ function attachEventListeners() {
     // Filter
     if (filterToggle) {
         filterToggle.addEventListener('click', () => {
-            if (filterSidebar) filterSidebar.classList.add('active');
+            if (filterSidebar) {
+                filterSidebar.classList.add('active');
+                if (hamburgerSidebar) hamburgerSidebar.classList.remove('active');
+                if (sidebarBackdrop) sidebarBackdrop.classList.add('active');
+                syncNativeBackHandler();
+            }
         });
     }
     
     if (closeFilter) {
         closeFilter.addEventListener('click', () => {
             if (filterSidebar) filterSidebar.classList.remove('active');
+            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+            syncNativeBackHandler();
         });
     }
     
@@ -166,6 +470,8 @@ function attachEventListeners() {
         applyFilter.addEventListener('click', () => {
             applyFilters();
             if (filterSidebar) filterSidebar.classList.remove('active');
+            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+            syncNativeBackHandler();
         });
     }
     
@@ -180,6 +486,16 @@ function attachEventListeners() {
             applyFilters();
         });
     }
+
+    // Sidebar Backdrop Click
+    if (sidebarBackdrop) {
+        sidebarBackdrop.addEventListener('click', () => {
+            if (hamburgerSidebar) hamburgerSidebar.classList.remove('active');
+            if (filterSidebar) filterSidebar.classList.remove('active');
+            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+            syncNativeBackHandler();
+        });
+    }
     
     // Load More
     if (loadMore) {
@@ -191,13 +507,20 @@ function attachEventListeners() {
     // Hamburger menu
     if (hamburgerMenu) {
         hamburgerMenu.addEventListener('click', () => {
-            if (hamburgerSidebar) hamburgerSidebar.classList.add('active');
+            if (hamburgerSidebar) {
+                hamburgerSidebar.classList.add('active');
+                if (filterSidebar) filterSidebar.classList.remove('active');
+                if (sidebarBackdrop) sidebarBackdrop.classList.add('active');
+                syncNativeBackHandler();
+            }
         });
     }
     
     if (closeHamburger) {
         closeHamburger.addEventListener('click', () => {
             if (hamburgerSidebar) hamburgerSidebar.classList.remove('active');
+            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+            syncNativeBackHandler();
         });
     }
     
@@ -208,6 +531,8 @@ function attachEventListeners() {
             const page = e.currentTarget.dataset.page;
             navigateToPage(page);
             if (hamburgerSidebar) hamburgerSidebar.classList.remove('active');
+            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+            syncNativeBackHandler();
         });
     });
     
@@ -296,25 +621,136 @@ function attachEventListeners() {
     if (shareBtn) {
         shareBtn.addEventListener('click', shareVideo);
     }
-    
-    // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            if (videoModal && videoModal.classList.contains('active')) {
-                closeVideoModal();
+
+    // PiP Button
+    const pipBtn = document.getElementById('pipBtn');
+    if (pipBtn) {
+        pipBtn.addEventListener('click', async () => {
+            try {
+                if (videoPlayer) {
+                    if (document.pictureInPictureElement) {
+                        await document.exitPictureInPicture();
+                    } else {
+                        await videoPlayer.requestPictureInPicture();
+                    }
+                }
+            } catch (error) {
+                console.error('PiP Error:', error);
             }
-            if (hamburgerSidebar && hamburgerSidebar.classList.contains('active')) {
-                hamburgerSidebar.classList.remove('active');
-            }
-            if (filterSidebar && filterSidebar.classList.contains('active')) {
-                filterSidebar.classList.remove('active');
-            }
-            const infoModal = document.getElementById('infoModal');
-            if (infoModal && infoModal.classList.contains('active')) {
-                infoModal.classList.remove('active');
-            }
+        });
+    }
+
+    // ─── Back Action Handler ────────────────────────────────────────────────────
+    // Exposed as window._handleBackAction so MainActivity.java can call it via
+    // evaluateJavascript when the native OnBackPressedCallback fires.
+    window._handleBackAction = function handleBackAction() {
+        const videoModal      = document.getElementById('videoModal');
+        const hamburgerSidebar = document.getElementById('hamburgerSidebar');
+        const filterSidebar   = document.getElementById('filterSidebar');
+        const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+        const infoModal       = document.getElementById('infoModal');
+
+        if (videoModal && videoModal.classList.contains('active')) {
+            closeVideoModal();
+            syncNativeBackHandler();
+            return true;
         }
+        if (hamburgerSidebar && hamburgerSidebar.classList.contains('active')) {
+            hamburgerSidebar.classList.remove('active');
+            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+            syncNativeBackHandler();
+            return true;
+        }
+        if (filterSidebar && filterSidebar.classList.contains('active')) {
+            filterSidebar.classList.remove('active');
+            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+            syncNativeBackHandler();
+            return true;
+        }
+        if (infoModal && infoModal.classList.contains('active')) {
+            infoModal.classList.remove('active');
+            syncNativeBackHandler();
+            return true;
+        }
+
+        const historyPage  = document.getElementById('historyPage');
+        const livePage     = document.getElementById('livePage');
+        const localPage    = document.getElementById('localPage');
+        const settingsPage = document.getElementById('settingsPage');
+        if (
+            (historyPage  && historyPage.style.display  === 'block') ||
+            (livePage     && livePage.style.display     === 'block') ||
+            (localPage    && localPage.style.display    === 'block') ||
+            (settingsPage && settingsPage.style.display === 'block')
+        ) {
+            navigateToPage('home');
+            syncNativeBackHandler();
+            return true;
+        }
+
+        return false;
+    };
+
+    // Keyboard Escape key (desktop / emulator)
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') window._handleBackAction();
     });
+
+    // ─── Native Back Handler Sync ───────────────────────────────────────────────
+    // Controls the native Android OnBackPressedCallback in MainActivity.java.
+    // When ENABLED  → Java intercepts back → forwards to _handleBackAction()
+    // When DISABLED → Android handles back natively → Predictive Back Preview!
+    function syncNativeBackHandler() {
+        if (!window.AndroidNativeTheme) return;          // not on Android
+        try {
+            const videoModal      = document.getElementById('videoModal');
+            const hamburgerSidebar = document.getElementById('hamburgerSidebar');
+            const filterSidebar   = document.getElementById('filterSidebar');
+            const infoModal       = document.getElementById('infoModal');
+            const historyPage     = document.getElementById('historyPage');
+            const livePage        = document.getElementById('livePage');
+            const localPage       = document.getElementById('localPage');
+            const settingsPage    = document.getElementById('settingsPage');
+
+            const needsHandler = Boolean(
+                (videoModal      && videoModal.classList.contains('active'))      ||
+                (hamburgerSidebar && hamburgerSidebar.classList.contains('active')) ||
+                (filterSidebar   && filterSidebar.classList.contains('active'))   ||
+                (infoModal       && infoModal.classList.contains('active'))       ||
+                (historyPage     && historyPage.style.display     === 'block')    ||
+                (livePage        && livePage.style.display        === 'block')    ||
+                (localPage       && localPage.style.display       === 'block')    ||
+                (settingsPage    && settingsPage.style.display    === 'block')
+            );
+
+            AndroidNativeTheme.setBackHandlerEnabled(needsHandler);
+        } catch(e) { console.warn('syncNativeBackHandler error:', e); }
+    }
+
+    // Also expose as global so navigateToPage etc. can call it
+    window._syncNativeBackHandler = syncNativeBackHandler;
+
+    // MutationObserver: auto-sync whenever modals or pages change
+    const _backObserver = new MutationObserver(() => syncNativeBackHandler());
+    [
+        document.getElementById('videoModal'),
+        document.getElementById('hamburgerSidebar'),
+        document.getElementById('filterSidebar'),
+        document.getElementById('infoModal')
+    ].forEach(el => {
+        if (el) _backObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+    });
+    [
+        document.getElementById('historyPage'),
+        document.getElementById('livePage'),
+        document.getElementById('localPage'),
+        document.getElementById('settingsPage')
+    ].forEach(el => {
+        if (el) _backObserver.observe(el, { attributes: true, attributeFilter: ['style'] });
+    });
+
+    // Initial sync after page load
+    setTimeout(syncNativeBackHandler, 800);
     
     // Footer links
     const aboutLink = document.getElementById('aboutLink');
@@ -488,6 +924,13 @@ async function loadRecommendations() {
 async function performSearch(query) {
     try {
         console.log('Searching for:', query);
+        
+        // Save to search query history (skip generic category/recommendation searches)
+        if (query && query !== 'Tatort' && query !== 'Dokumentation' && query !== 'Spielfilm' && query !== 'Nachrichten' && query !== 'Sport' && query !== 'Kinder' && query !== 'Reportage') {
+            saveSearchQuery(query);
+        }
+        hideSearchHistoryDropdown();
+        
         currentQuery = query;
         currentCategory = query; // Set category for series detection
         currentOffset = 0;
@@ -565,15 +1008,21 @@ function displayResults() {
             return;
         }
         
-        const toDisplay = currentResults.slice(0, resultsPerPage);
+        // Reset currentOffset
+        currentOffset = 0;
+        
+        // Group the ENTIRE currentResults list (up to 200 items)
+        const grouped = groupAllResults(currentResults);
+        currentDisplayItems = grouped;
+        
+        const toDisplay = currentDisplayItems.slice(0, resultsPerPage);
         displayedResults = toDisplay;
         
         videoGrid.innerHTML = '';
         showEmpty(false);
         
-        // ALWAYS try to group by series - intelligent grouping will filter out non-series
-        console.log('Attempting series grouping for', toDisplay.length, 'items');
-        displaySeriesGrouped(toDisplay);
+        // Render grouped display items (series cards or standalones)
+        renderDisplayItems(toDisplay);
         
         // Update results count
         if (resultsCount) {
@@ -583,7 +1032,7 @@ function displayResults() {
         // Show/hide load more button
         const loadMoreContainer = document.querySelector('.load-more-container');
         if (loadMoreContainer) {
-            if (currentResults.length > resultsPerPage) {
+            if (currentDisplayItems.length > resultsPerPage) {
                 loadMoreContainer.style.display = 'block';
             } else {
                 loadMoreContainer.style.display = 'none';
@@ -827,14 +1276,12 @@ function isSeriesContext(items) {
 }
 
 // REGEL 1 + 2 + 3: displaySeriesGrouped - Topic-basierte Gruppierung
-function displaySeriesGrouped(items) {
-    console.log('[displaySeriesGrouped] Starte Gruppierung für', items.length, 'Items');
-    
-    // Map: normalisierter Topic → { originalTopic, episodes }
+// Group all results by series (topic-based)
+function groupAllResults(items) {
     const seriesMap = new Map();
     const standaloneVideos = [];
     
-    items.forEach((item, idx) => {
+    items.forEach((item) => {
         const normalizedTopic = normalizeTopicKey(item.topic);
         
         // FILTER: Hörfassungen komplett rauswerfen (Topic ODER Title)
@@ -848,20 +1295,17 @@ function displaySeriesGrouped(items) {
             topicLower.includes('audiodeskription') ||
             descLower.includes('hörfassung') ||
             descLower.includes('audiodeskription')) {
-            console.log(`[${idx}] Hörfassung → ÜBERSPRUNGEN:`, item.title);
-            return; // Komplett überspringen, nicht mal als Standalone
+            return; // Skip Hörfassungen komplett
         }
         
-        // Kein Topic → Standalone
+        // Kein Topic -> Standalone
         if (!normalizedTopic) {
-            console.log(`[${idx}] Kein Topic → Standalone:`, item.title);
             standaloneVideos.push(item);
             return;
         }
         
-        // Blacklisted → Standalone
+        // Blacklisted -> Standalone
         if (isBlacklisted(item.topic)) {
-            console.log(`[${idx}] Blacklisted → Standalone:`, item.topic);
             standaloneVideos.push(item);
             return;
         }
@@ -871,16 +1315,16 @@ function displaySeriesGrouped(items) {
         const parseResult = parser.parse();
         
         if (parseResult.confidence < 40) {
-            // Keine Episode erkannt → Standalone
-            console.log(`[${idx}] Keine Episode (confidence ${parseResult.confidence}) → Standalone:`, item.title);
+            // Keine Episode erkannt -> Standalone
             standaloneVideos.push(item);
             return;
         }
         
-        // Episode erkannt → zur Serie hinzufügen
-        console.log(`[${idx}] Episode erkannt (${parseResult.pattern}, confidence ${parseResult.confidence}):`, item.title);
-        console.log(`     → Topic: "${item.topic}" (normalized: "${normalizedTopic}")`);
-        console.log(`     → S${parseResult.season}E${parseResult.episode}`);
+        // For Emma's Chatroom specifically: force parsedSeason to be 1 as requested by the user
+        let parsedSeason = parseResult.season;
+        if (normalizedTopic === 'emmas chatroom') {
+            parsedSeason = 1;
+        }
         
         if (!seriesMap.has(normalizedTopic)) {
             seriesMap.set(normalizedTopic, {
@@ -891,60 +1335,70 @@ function displaySeriesGrouped(items) {
         
         seriesMap.get(normalizedTopic).episodes.push({
             ...item,
-            parsedSeason: parseResult.season,
+            parsedSeason: parsedSeason,
             parsedEpisode: parseResult.episode,
             parseConfidence: parseResult.confidence,
             parsePattern: parseResult.pattern
         });
     });
     
-    console.log('\n[displaySeriesGrouped] Gruppierungs-Ergebnis:');
-    console.log(`  - ${seriesMap.size} Serie(n) gefunden`);
-    console.log(`  - ${standaloneVideos.length} Standalone-Videos`);
+    const displayList = [];
     
-    // Zeige Series Cards (nur wenn 2+ Episoden)
+    // Process series (groups with 2+ episodes)
     seriesMap.forEach((seriesData, normalizedTopic) => {
         const episodeCount = seriesData.episodes.length;
-        console.log(`  - Serie "${seriesData.originalTopic}": ${episodeCount} Episoden`);
         
         if (episodeCount >= 2) {
-            // WICHTIG: Sortiere Episoden BEVOR sie an createSeriesCard übergeben werden!
+            // Sort episodes: Season first, then Episode, then Timestamp
             seriesData.episodes.sort((a, b) => {
-                // Wenn beide eine parsedEpisode haben: sortiere nach Staffel+Episode
                 if (a.parsedSeason && b.parsedSeason) {
-                    // Erst nach Staffel sortieren
                     if (a.parsedSeason !== b.parsedSeason) {
                         return a.parsedSeason - b.parsedSeason;
                     }
                 }
-                
-                // Dann nach Episode sortieren (falls vorhanden)
                 if (a.parsedEpisode && b.parsedEpisode) {
                     if (a.parsedEpisode !== b.parsedEpisode) {
                         return a.parsedEpisode - b.parsedEpisode;
                     }
                 }
-                
-                // REGEL 4: Fallback auf Datum (neueste zuerst)
                 return b.timestamp - a.timestamp;
             });
             
-            console.log(`    → Episoden sortiert: ${seriesData.episodes.map(e => `S${e.parsedSeason}E${e.parsedEpisode}`).join(', ')}`);
-            
-            const seriesCard = createSeriesCard(seriesData.originalTopic, seriesData.episodes);
-            videoGrid.appendChild(seriesCard);
+            displayList.push({
+                type: 'series',
+                title: seriesData.originalTopic,
+                episodes: seriesData.episodes
+            });
         } else {
-            // Nur 1 Episode → als Standalone anzeigen
-            console.log(`    → Nur 1 Episode, zeige als Standalone`);
+            // Only 1 episode -> standalone
             standaloneVideos.push(...seriesData.episodes);
         }
     });
     
-    // Zeige Standalone-Videos
-    console.log(`\n[displaySeriesGrouped] Zeige ${standaloneVideos.length} Standalone-Videos`);
-    standaloneVideos.forEach((item, idx) => {
-        const card = createVideoCard(item, idx);
-        videoGrid.appendChild(card);
+    // Sort standalone videos by timestamp desc (default search order)
+    standaloneVideos.sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Add standalones to display list
+    standaloneVideos.forEach(item => {
+        displayList.push({
+            type: 'video',
+            data: item
+        });
+    });
+    
+    return displayList;
+}
+
+// Render display items
+function renderDisplayItems(items) {
+    items.forEach((item, index) => {
+        if (item.type === 'series') {
+            const seriesCard = createSeriesCard(item.title, item.episodes);
+            if (videoGrid) videoGrid.appendChild(seriesCard);
+        } else {
+            const card = createVideoCard(item.data, currentOffset + index);
+            if (videoGrid) videoGrid.appendChild(card);
+        }
     });
 }
 
@@ -952,15 +1406,8 @@ function displaySeriesGrouped(items) {
 async function openSeriesDetail(seriesName, episodes) {
     console.log('[openSeriesDetail] Öffne Serie:', seriesName, 'mit', episodes.length, 'Episoden');
     
-    // Verstecke aktuelle Seite
-    const mainPage = document.querySelector('.content-section:not([style*="display: none"])');
-    if (mainPage) {
-        mainPage.style.display = 'none';
-    }
-    
-    // Zeige Detail-Seite
-    const detailPage = document.getElementById('seriesDetailPage');
-    detailPage.style.display = 'block';
+    // Navigate to seriesDetail using unified navigateToPage
+    navigateToPage('seriesDetail');
     
     // Setze Titel
     document.getElementById('seriesDetailTitle').innerHTML = `<i class="fas fa-tv"></i> ${seriesName}`;
@@ -1084,6 +1531,18 @@ async function openSeriesDetail(seriesName, episodes) {
         console.log('[openSeriesDetail] ✓ Verwende TMDB-Poster');
     }
     
+    // Set TMDB backdrop as background of series-info-container if available
+    if (tmdbDetails && tmdbDetails.backdrop_path) {
+        const backdropURL = getTMDBBackdropURL(tmdbDetails.backdrop_path);
+        seriesInfo.style.backgroundImage = `linear-gradient(to right, rgba(9, 9, 11, 0.95) 30%, rgba(9, 9, 11, 0.45) 100%), url(${backdropURL})`;
+        seriesInfo.style.backgroundSize = 'cover';
+        seriesInfo.style.backgroundPosition = 'center';
+    } else {
+        seriesInfo.style.backgroundImage = '';
+        seriesInfo.style.backgroundSize = '';
+        seriesInfo.style.backgroundPosition = '';
+    }
+    
     // Baue Serien-Info HTML
     seriesInfo.innerHTML = `
         <div class="series-info-poster" id="${posterId}" ${posterStyle}>
@@ -1134,12 +1593,16 @@ async function openSeriesDetail(seriesName, episodes) {
     
     // Setup Back-Button
     const backBtn = document.getElementById('backFromSeries');
-    backBtn.onclick = () => {
-        detailPage.style.display = 'none';
-        if (mainPage) {
-            mainPage.style.display = 'block';
-        }
-    };
+    if (backBtn) {
+        backBtn.addEventListener('click', (e) => {
+            try {
+                window._haptic?.tick?.();
+                navigateToPage(previousPage || 'home');
+            } catch (err) {
+                console.error('Back button error:', err);
+            }
+        });
+    }
     
     console.log('[openSeriesDetail] ✓ Detail-Seite geladen');
 }
@@ -1206,10 +1669,22 @@ function createVideoCard(item, index) {
     const date = new Date(item.timestamp * 1000);
     const dateText = formatDate(date);
 
+    const progressKey = getVideoProgressKey(item);
+    const progress = progressKey ? getVideoProgress(progressKey) : null;
+    let progressHTML = '';
+    if (progress && progress.percent > 0) {
+        progressHTML = `
+            <div class="video-progress-bar-container" style="position: absolute; bottom: 0; left: 0; right: 0; height: 4px; background: rgba(255, 255, 255, 0.25); z-index: 10; overflow: hidden; border-radius: 0 0 16px 16px;">
+                <div class="video-progress-bar-fill" style="width: ${progress.percent}%; height: 100%; background: var(--primary-color); border-radius: inherit;"></div>
+            </div>
+        `;
+    }
+
     card.innerHTML = `
         <div class="video-thumbnail" id="${thumbnailId}" style="background: ${gradient};">
             <span class="sender-logo thumb-overlay-logo">${item.channel}</span>
             <span class="duration-badge">${durationText}</span>
+            ${progressHTML}
         </div>
         <div class="video-card-content">
             <h3 class="video-card-title">${item.title}</h3>
@@ -1388,8 +1863,40 @@ function playVideo(item) {
             };
         }
         
+        // Store currently playing video info
+        window.currentPlayingVideo = item;
+
+        // Check for saved progress
+        let resumeTime = 0;
+        const progressKey = getVideoProgressKey(item);
+        const progress = progressKey ? getVideoProgress(progressKey) : null;
+        if (progress && progress.currentTime > 5) {
+            resumeTime = progress.currentTime;
+            console.log(`Resuming video at ${resumeTime}s`);
+            
+            // Show a temporary toast in the video player indicating we resumed
+            setTimeout(() => {
+                const toast = document.createElement('div');
+                toast.className = 'resume-toast';
+                toast.style.cssText = 'position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(9, 9, 11, 0.85); color: #f8fafc; padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; font-weight: 500; border: 1px solid var(--primary-color); z-index: 10000; pointer-events: none; opacity: 1; transition: opacity 0.5s ease;';
+                
+                const min = Math.floor(resumeTime / 60);
+                const sec = Math.floor(resumeTime % 60).toString().padStart(2, '0');
+                toast.textContent = `Wiedergabe bei ${min}:${sec} fortgesetzt`;
+                
+                const container = document.querySelector('.video-player-container');
+                if (container) {
+                    container.appendChild(toast);
+                    setTimeout(() => {
+                        toast.style.opacity = '0';
+                        setTimeout(() => toast.remove(), 500);
+                    }, 2500);
+                }
+            }, 800);
+        }
+
         // Load video
-        loadVideoSource(videoUrl);
+        loadVideoSource(videoUrl, resumeTime);
         
         // Show modal
         if (videoModal) videoModal.classList.add('active');
@@ -1405,6 +1912,43 @@ function playVideo(item) {
 
 function loadVideoSource(videoUrl, resumeTime = 0) {
     try {
+        if (resumeTime > 0) {
+            let seeked = false;
+            const performSeek = () => {
+                if (seeked) return;
+                try {
+                    videoPlayer.currentTime = resumeTime;
+                    seeked = true;
+                    console.log(`[Resume] Seeked videoPlayer to ${resumeTime}s`);
+                } catch (err) {
+                    console.warn('[Resume] Seek failed, will retry:', err);
+                }
+            };
+            
+            // Listen to multiple indicators that seeking is possible
+            videoPlayer.addEventListener('loadedmetadata', performSeek, { once: true });
+            videoPlayer.addEventListener('canplay', performSeek, { once: true });
+            
+            // Check on play start and force-seek if it was reset (very common in HLS stream starts)
+            const onPlaying = () => {
+                if (!seeked) {
+                    performSeek();
+                } else {
+                    if (Math.abs(videoPlayer.currentTime - resumeTime) > 3) {
+                        console.log(`[Resume] Correcting currentTime to ${resumeTime}s`);
+                        try { videoPlayer.currentTime = resumeTime; } catch (_) {}
+                    }
+                }
+                videoPlayer.removeEventListener('playing', onPlaying);
+            };
+            videoPlayer.addEventListener('playing', onPlaying);
+            
+            // If media state is already ready
+            if (videoPlayer.readyState >= 1) {
+                performSeek();
+            }
+        }
+
         if (videoUrl.includes('.m3u8') && typeof Hls !== 'undefined') {
             if (Hls.isSupported()) {
                 if (hlsInstance) hlsInstance.destroy();
@@ -1412,17 +1956,14 @@ function loadVideoSource(videoUrl, resumeTime = 0) {
                 hlsInstance.loadSource(videoUrl);
                 hlsInstance.attachMedia(videoPlayer);
                 hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-                    if (resumeTime > 0) videoPlayer.currentTime = resumeTime;
                     videoPlayer.play();
                 });
             } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
                 videoPlayer.src = videoUrl;
-                if (resumeTime > 0) videoPlayer.currentTime = resumeTime;
                 videoPlayer.play();
             }
         } else {
             videoPlayer.src = videoUrl;
-            if (resumeTime > 0) videoPlayer.currentTime = resumeTime;
             videoPlayer.play();
         }
     } catch (error) {
@@ -1441,6 +1982,7 @@ function closeVideoModal() {
             hlsInstance.destroy();
             hlsInstance = null;
         }
+        syncNativeBackHandler();
     } catch (error) {
         console.error('Close modal error:', error);
     }
@@ -1611,16 +2153,13 @@ function applyFilters() {
 // Display More Results
 function displayMoreResults() {
     currentOffset += resultsPerPage;
-    const toDisplay = currentResults.slice(currentOffset, currentOffset + resultsPerPage);
+    const toDisplay = currentDisplayItems.slice(currentOffset, currentOffset + resultsPerPage);
     
-    toDisplay.forEach((item, index) => {
-        const card = createVideoCard(item, currentOffset + index);
-        if (videoGrid) videoGrid.appendChild(card);
-    });
+    renderDisplayItems(toDisplay);
     
-    displayedResults = currentResults.slice(0, currentOffset + resultsPerPage);
+    displayedResults = currentDisplayItems.slice(0, currentOffset + resultsPerPage);
     
-    if (currentOffset + resultsPerPage >= currentResults.length) {
+    if (currentOffset + resultsPerPage >= currentDisplayItems.length) {
         const loadMoreContainer = document.querySelector('.load-more-container');
         if (loadMoreContainer) loadMoreContainer.style.display = 'none';
     }
@@ -1628,25 +2167,81 @@ function displayMoreResults() {
 
 // Page Navigation
 function navigateToPage(page) {
+    if (page !== currentPage) {
+        previousPage = currentPage;
+    }
     currentPage = page;
-    
-    const mainVideoSection = document.getElementById('mainVideoSection');
-    const historyPage = document.getElementById('historyPage');
-    const recentlyWatched = document.getElementById('recentlyWatched');
-    
+    console.log('navigateToPage to:', page);
+
+    const sections = [
+        'mainVideoSection',
+        'historyPage',
+        'recentlyWatched',
+        'livePage',
+        'localPage',
+        'localFolderDetailPage',
+        'seriesDetailPage',
+        'settingsPage'
+    ];
+
+    // Hide all sections first
+    sections.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
+
+    // Show the requested page sections
     if (page === 'home') {
+        const mainVideoSection = document.getElementById('mainVideoSection');
+        const recentlyWatched = document.getElementById('recentlyWatched');
         if (mainVideoSection) mainVideoSection.style.display = 'block';
-        if (historyPage) historyPage.style.display = 'none';
-        if (recentlyWatched) recentlyWatched.style.display = 'block'; // Show on home
+        if (recentlyWatched) recentlyWatched.style.display = 'block';
         loadDefaultContent();
         loadRecentlyWatched();
     } else if (page === 'history') {
-        if (mainVideoSection) mainVideoSection.style.display = 'none';
+        const historyPage = document.getElementById('historyPage');
         if (historyPage) historyPage.style.display = 'block';
-        if (recentlyWatched) recentlyWatched.style.display = 'none'; // Hide on history page
         loadFullHistoryPage();
+    } else if (page === 'live') {
+        const livePage = document.getElementById('livePage');
+        if (livePage) livePage.style.display = 'block';
+        loadLiveChannels();
+    } else if (page === 'local') {
+        const localPage = document.getElementById('localPage');
+        if (localPage) localPage.style.display = 'block';
+        loadLocalVideosPage();
+    } else if (page === 'settings') {
+        const settingsPage = document.getElementById('settingsPage');
+        if (settingsPage) settingsPage.style.display = 'block';
+        loadSettings();
+    } else if (page === 'seriesDetail') {
+        const seriesDetailPage = document.getElementById('seriesDetailPage');
+        if (seriesDetailPage) seriesDetailPage.style.display = 'block';
+    } else if (page === 'localFolderDetail') {
+        const localFolderDetailPage = document.getElementById('localFolderDetailPage');
+        if (localFolderDetailPage) localFolderDetailPage.style.display = 'block';
     }
+
+    // Update active nav links / hamburger items
+    document.querySelectorAll('.hamburger-item[data-page]').forEach(el => {
+        el.classList.toggle('active-page', el.dataset.page === page);
+    });
+
+    // Update main navbar category links active state
+    document.querySelectorAll('.nav-categories a').forEach(link => {
+        const cat = link.dataset.category;
+        const pg = link.dataset.page;
+        if (pg === page || (page === 'home' && cat === 'home')) {
+            document.querySelectorAll('.nav-categories a').forEach(l => l.classList.remove('active'));
+            link.classList.add('active');
+        }
+    });
+
+    // Sync native back handler so predictive back works correctly
+    if (window._syncNativeBackHandler) window._syncNativeBackHandler();
 }
+
+window.navigateToPage = navigateToPage;
 
 // Load Full History Page
 function loadFullHistoryPage() {
@@ -2265,9 +2860,21 @@ function renderFolderVideos(videos) {
 document.addEventListener('DOMContentLoaded', () => {
     const backBtn = document.getElementById('backToLocalFolders');
     if (backBtn) {
-        backBtn.addEventListener('click', () => {
-            document.getElementById('localFolderDetailPage').style.display = 'none';
-            document.getElementById('localPage').style.display = 'block';
+        backBtn.addEventListener('click', (e) => {
+            try {
+                window._haptic?.tick?.();
+                const detailPage = document.getElementById('localFolderDetailPage');
+                const localPage = document.getElementById('localPage');
+                if (detailPage) {
+                    detailPage.style.display = 'none';
+                }
+                if (localPage) {
+                    localPage.style.display = 'block';
+                    localPage.scrollTop = 0;
+                }
+            } catch (err) {
+                console.error('Back button error:', err);
+            }
         });
     }
 });
@@ -2460,52 +3067,6 @@ function saveSettings() {
     console.log('Settings saved:', { useRealThumbnails });
 }
 
-// ===== NAVIGATION =====
-window.navigateToPage = function(page) {
-    console.log('navigateToPage:', page);
-    
-    const mainVideoSection = document.getElementById('mainVideoSection');
-    const historyPage = document.getElementById('historyPage');
-    const recentlyWatched = document.getElementById('recentlyWatched');
-    const livePage = document.getElementById('livePage');
-    const localPage = document.getElementById('localPage');
-    const settingsPage = document.getElementById('settingsPage');
-    const seriesDetailPage = document.getElementById('seriesDetailPage');
-    const localFolderDetailPage = document.getElementById('localFolderDetailPage');
-    
-    // Hide all pages including detail pages
-    if (mainVideoSection) mainVideoSection.style.display = 'none';
-    if (historyPage) historyPage.style.display = 'none';
-    if (recentlyWatched) recentlyWatched.style.display = 'none';
-    if (livePage) livePage.style.display = 'none';
-    if (localPage) localPage.style.display = 'none';
-    if (settingsPage) settingsPage.style.display = 'none';
-    if (seriesDetailPage) seriesDetailPage.style.display = 'none';
-    if (localFolderDetailPage) localFolderDetailPage.style.display = 'none';
-    
-    // Show requested
-    if (page === 'home') {
-        if (mainVideoSection) mainVideoSection.style.display = 'block';
-        if (recentlyWatched) recentlyWatched.style.display = 'block';
-        loadDefaultContent();
-        loadRecentlyWatched();
-    } else if (page === 'history') {
-        if (historyPage) historyPage.style.display = 'block';
-        loadFullHistoryPage();
-    } else if (page === 'live') {
-        if (livePage) livePage.style.display = 'block';
-        loadLiveChannels();
-    } else if (page === 'local') {
-        if (localPage) localPage.style.display = 'block';
-        loadLocalVideosPage();
-    } else if (page === 'settings') {
-        if (settingsPage) settingsPage.style.display = 'block';
-        loadSettings();
-    }
-    
-    console.log('Page navigated to:', page);
-};
-
 // ===== TOGGLE DESCRIPTION =====
 window.toggleModalDesc = function(btn) {
     const descId = btn.dataset.descId;
@@ -2549,7 +3110,7 @@ async function captureVideoFrame(videoUrl) {
         const video = document.createElement('video');
         video.crossOrigin = 'anonymous';
         video.muted = true;
-        video.preload = 'metadata';
+        video.preload = 'auto'; // Request enough data to play immediately
         video.playsInline = true;
         // Hidden but with actual dimensions so drawImage works
         video.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:320px;height:180px;visibility:hidden;pointer-events:none;';
@@ -2568,7 +3129,7 @@ async function captureVideoFrame(videoUrl) {
             resolve(result);
         };
 
-        const timeout = setTimeout(() => done(null), 16000);
+        const timeout = setTimeout(() => done(null), 12000); // 12s max timeout
 
         const captureFrame = () => {
             try {
@@ -2576,7 +3137,7 @@ async function captureVideoFrame(videoUrl) {
                 canvas.width = 320;
                 canvas.height = 180;
                 canvas.getContext('2d').drawImage(video, 0, 0, 320, 180);
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
                 clearTimeout(timeout);
                 done(dataUrl);
             } catch (e) {
@@ -2585,32 +3146,59 @@ async function captureVideoFrame(videoUrl) {
             }
         };
 
-        video.addEventListener('seeked', captureFrame, { once: true });
-        video.addEventListener('loadeddata', () => {
-            try {
-                const t = Math.min(5, (video.duration || 10) * 0.08);
-                video.currentTime = t > 0.5 ? t : 3;
-            } catch (e) { done(null); }
-        }, { once: true });
+        let captured = false;
+        const doCapture = () => {
+            if (captured) return;
+            captured = true;
+            video.pause();
+            captureFrame();
+        };
+
+        // For both HLS and direct video, capturing on timeupdate is extremely fast
+        video.addEventListener('timeupdate', () => {
+            if (video.currentTime > 0.1) {
+                doCapture();
+            }
+        });
+
         video.addEventListener('error', () => { clearTimeout(timeout); done(null); }, { once: true });
 
         if (videoUrl && videoUrl.includes('.m3u8')) {
-            // HLS stream — use hls.js
+            // HLS stream — use optimized hls.js settings
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                hlsCap = new Hls({ maxBufferLength: 8, maxMaxBufferLength: 15, enableWorker: false });
+                hlsCap = new Hls({
+                    maxBufferLength: 1,
+                    maxMaxBufferLength: 2,
+                    maxBufferSize: 500 * 1024, // 500KB buffer to keep it light
+                    enableAudio: false,
+                    enableWorker: true,
+                    capLevelToPlayerSize: true,
+                    lowLatencyMode: true
+                });
                 hlsCap.loadSource(videoUrl);
                 hlsCap.attachMedia(video);
                 hlsCap.on(Hls.Events.MANIFEST_PARSED, () => {
-                    video.play()
-                        .then(() => setTimeout(() => { video.pause(); captureFrame(); }, 2800))
-                        .catch(() => done(null));
+                    video.play().catch(() => {
+                        // Fallback: wait a bit then capture whatever is loaded
+                        setTimeout(doCapture, 1000);
+                    });
                 });
                 hlsCap.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { clearTimeout(timeout); done(null); } });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = videoUrl;
+                video.play().catch(() => setTimeout(doCapture, 1000));
             } else {
                 done(null);
             }
         } else {
+            // Standard MP4 stream — just play and capture on timeupdate (no network seeks!)
             video.src = videoUrl;
+            video.addEventListener('loadeddata', () => {
+                video.play().catch(() => {
+                    // Fallback if autoplay is blocked or fails
+                    setTimeout(doCapture, 1000);
+                });
+            }, { once: true });
         }
     });
 }
@@ -2618,11 +3206,37 @@ async function captureVideoFrame(videoUrl) {
 // ── Thumbnail queue ────────────────────────────────────────────────────────────
 const realThumbQueue = [];
 let realThumbBusy = false;
-const MAX_REAL_THUMBS = 3;
+const MAX_REAL_THUMBS = 6;
 let activeRealThumbs = 0;
 
-function queueRealThumbnail(videoUrl, cacheKey, element, fallbackGradient) {
+async function queueRealThumbnail(videoUrl, cacheKey, element, fallbackGradient) {
     if (!videoUrl || !element) return;
+    
+    // 1. Check disk cache immediately to avoid entering queue
+    if (window.electronAPI && window.electronAPI.getCachedThumbnail) {
+        try {
+            const cached = await window.electronAPI.getCachedThumbnail(cacheKey);
+            if (cached) {
+                applyThumbDataUrl(element, cached);
+                return;
+            }
+        } catch (_) {}
+    }
+    
+    // 2. Check localStorage cache immediately
+    try {
+        const lsCached = localStorage.getItem('t_' + cacheKey);
+        if (lsCached) {
+            applyThumbDataUrl(element, lsCached);
+            if (window.electronAPI && window.electronAPI.setCachedThumbnail) {
+                window.electronAPI.setCachedThumbnail(cacheKey, lsCached).catch(() => {});
+                localStorage.removeItem('t_' + cacheKey);
+            }
+            return;
+        }
+    } catch (_) {}
+    
+    // 3. Queue for generation
     realThumbQueue.push({ videoUrl, cacheKey, element, fallbackGradient });
     drainThumbQueue();
 }
