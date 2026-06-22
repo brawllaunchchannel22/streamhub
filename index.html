@@ -119,6 +119,9 @@
             </div>
             <button id="applyFilter" class="btn-primary">Filter anwenden</button>
             <button id="resetFilter" class="btn-secondary">Zurücksetzen</button>
+            <button id="quickSubscribeBtn" class="btn-secondary" style="margin-top:0.5rem;" title="Aktuelle Suche abonnieren">
+                <i class="fas fa-bell"></i> Suche abonnieren
+            </button>
         </div>
     </div>
 
@@ -133,6 +136,14 @@
                 <i class="fas fa-home"></i>
                 <span>Startseite</span>
             </a>
+            <a href="#" class="hamburger-item" data-page="history">
+                <i class="fas fa-history"></i>
+                <span>Verlauf</span>
+            </a>
+            <a href="#" class="hamburger-item" data-page="watchlist">
+                <i class="fas fa-heart"></i>
+                <span>Merkliste</span>
+            </a>
             <a href="#" class="hamburger-item" data-page="live">
                 <i class="fas fa-broadcast-tower"></i>
                 <span>Live TV</span>
@@ -141,9 +152,17 @@
                 <i class="fas fa-folder"></i>
                 <span>Lokale Videos</span>
             </a>
-            <a href="#" class="hamburger-item" data-page="history">
-                <i class="fas fa-history"></i>
-                <span>Verlauf</span>
+            <a href="#" class="hamburger-item" data-page="stats">
+                <i class="fas fa-chart-bar"></i>
+                <span>Statistiken</span>
+            </a>
+            <a href="#" class="hamburger-item" data-page="abos">
+                <i class="fas fa-bell"></i>
+                <span>Abonnements</span>
+            </a>
+            <a href="#" class="hamburger-item" data-page="downloads">
+                <i class="fas fa-download"></i>
+                <span>Downloads</span>
             </a>
             <a href="#" class="hamburger-item" data-page="settings">
                 <i class="fas fa-cog"></i>
@@ -166,6 +185,130 @@
             <div class="video-grid recent-grid recent-grid-compact" id="recentGrid"></div>
         </section>
 
+        <!-- Watchlist Page -->
+        <section id="watchlistPage" class="content-section" style="display: none;">
+            <div class="section-header">
+                <h2><i class="fas fa-heart"></i> Merkliste</h2>
+                <div class="recent-controls">
+                    <button id="clearWatchlistBtn" class="text-btn">Merkliste leeren</button>
+                </div>
+            </div>
+            <div id="watchlistEmpty" class="empty-state" style="display: none;">
+                <i class="fas fa-heart" style="color: var(--text-secondary);"></i>
+                <h3>Deine Merkliste ist leer</h3>
+                <p>Drücke das <i class="fas fa-heart" style="color:#ec4899;"></i>-Herz auf einer Karte, um Videos zu speichern</p>
+            </div>
+            <div class="video-grid" id="watchlistGrid"></div>
+        </section>
+
+        <!-- Abonnements Page -->
+        <section id="abosPage" class="content-section" style="display: none;">
+            <div class="section-header">
+                <h2><i class="fas fa-bell"></i> Abonnements</h2>
+            </div>
+            <div class="abos-container">
+                <div class="abos-add-row">
+                    <div class="abos-input-wrapper">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="aboSearchInput" class="setting-input" placeholder="Suchbegriff abonnieren, z.B. &quot;Tatort&quot;, &quot;Weltspiegel&quot;...">
+                    </div>
+                    <button id="aboAddBtn" class="btn-primary"><i class="fas fa-plus"></i> Abonnieren</button>
+                </div>
+                <div id="aboNotifications" class="abo-notifications" style="display:none;"></div>
+                <div id="abosList" class="abos-list"></div>
+                <div id="abosEmpty" class="empty-state" style="display:none;">
+                    <i class="fas fa-bell-slash"></i>
+                    <h3>Keine Abonnements</h3>
+                    <p>Abonniere Suchbegriffe und werde benachrichtigt, wenn neue Inhalte verfügbar sind</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Downloads Page -->
+        <section id="downloadsPage" class="content-section" style="display: none;">
+            <div class="section-header">
+                <h2><i class="fas fa-download"></i> Downloads</h2>
+                <div class="downloads-header-actions">
+                    <button id="clearCompletedBtn" class="btn-secondary btn-sm"><i class="fas fa-trash-alt"></i> Abgeschlossene löschen</button>
+                    <button id="openDownloadFolderBtn" class="btn-secondary btn-sm"><i class="fas fa-folder-open"></i> Ordner öffnen</button>
+                </div>
+            </div>
+            <div class="downloads-tabs">
+                <button class="dl-tab active" data-tab="active">Aktiv <span id="dlActiveCount" class="dl-count">0</span></button>
+                <button class="dl-tab" data-tab="completed">Abgeschlossen <span id="dlCompletedCount" class="dl-count">0</span></button>
+            </div>
+            <div id="dlActivePanel" class="dl-panel">
+                <div id="dlActiveList" class="dl-list"></div>
+                <div id="dlActiveEmpty" class="empty-state" style="display:none;">
+                    <i class="fas fa-cloud-download-alt"></i>
+                    <h3>Keine aktiven Downloads</h3>
+                    <p>Starte einen Download über den Detail-Dialog eines Videos</p>
+                </div>
+            </div>
+            <div id="dlCompletedPanel" class="dl-panel" style="display:none;">
+                <div id="dlCompletedList" class="dl-list"></div>
+                <div id="dlCompletedEmpty" class="empty-state" style="display:none;">
+                    <i class="fas fa-check-circle"></i>
+                    <h3>Keine abgeschlossenen Downloads</h3>
+                    <p>Fertige Downloads erscheinen hier</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Statistics Page -->
+        <section id="statsPage" class="content-section" style="display: none;">
+            <div class="section-header">
+                <h2><i class="fas fa-chart-bar"></i> Statistiken</h2>
+            </div>
+            <div class="stats-container">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-clock"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-label">Wiedergabezeit</span>
+                            <span class="stat-value" id="statsWatchTime">0 Min</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-play-circle"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-label">Angesehene Videos</span>
+                            <span class="stat-value" id="statsVideoCount">0</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-fire"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-label">Tages-Streak</span>
+                            <span class="stat-value" id="statsStreak">0 Tage</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-tv"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-label">Lieblingssender</span>
+                            <span class="stat-value" id="statsFavChannel">-</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="stats-charts-row">
+                    <div class="stats-chart-card">
+                        <h3><i class="fas fa-broadcast-tower"></i> Top Sender</h3>
+                        <div id="statsTopChannels" class="chart-bars-container">
+                            <!-- JS populated bars -->
+                        </div>
+                    </div>
+                    <div class="stats-chart-card">
+                        <h3><i class="fas fa-tags"></i> Beliebte Themen</h3>
+                        <div id="statsTopTopics" class="chart-bars-container">
+                            <!-- JS populated bars -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Full History Page -->
         <section id="historyPage" class="content-section" style="display: none;">
             <div class="section-header">
@@ -184,6 +327,7 @@
                 <h2><i class="fas fa-broadcast-tower"></i> Live TV</h2>
             </div>
             <div class="live-channels-grid" id="liveChannelsGrid"></div>
+            <div id="liveEpgContainer" class="live-page-epg"></div>
         </section>
 
         <!-- Local Videos Page -->
@@ -261,6 +405,17 @@
                             <input type="checkbox" id="settingAutoplay" checked>
                             <span>Videos automatisch abspielen</span>
                         </label>
+                    </div>
+                    <div class="setting-item">
+                        <label>Farbtheme</label>
+                        <select id="settingTheme" class="setting-select">
+                            <option value="dark">Standard Dunkel</option>
+                            <option value="amoled">Amoled Schwarz</option>
+                            <option value="light">Hell</option>
+                            <option value="ocean">Ozeanblau</option>
+                            <option value="purple">Mitternachtslila</option>
+                            <option value="system">System / Dynamisch (Android)</option>
+                        </select>
                     </div>
                 </div>
                 <div class="settings-section">
@@ -385,6 +540,10 @@
                 <video id="videoPlayer" controls>
                     <track id="subtitleTrack" kind="subtitles" srclang="de" label="Deutsch">
                 </video>
+                <div id="trailerPlayerContainer" style="display: none; position: absolute; top:0; left:0; width:100%; height:100%; z-index:10; background:#000;">
+                    <iframe id="trailerPlayer" src="" style="width:100%; height:100%; border:none;" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+                    <button id="closeTrailerBtn" class="action-btn" style="position:absolute; top:10px; right:10px; z-index:11; background:rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.2);"><i class="fas fa-times"></i> Trailer schließen</button>
+                </div>
             </div>
             
             <div class="video-details">
@@ -394,6 +553,7 @@
                         <span id="videoChannel" class="channel-badge"></span>
                         <span id="videoDuration"></span>
                         <span id="videoDate"></span>
+                        <span id="videoRating" style="display: none; font-weight: 600;"></span>
                     </div>
                     <p id="videoDescription"></p>
                 </div>
@@ -411,21 +571,25 @@
                         </label>
                         <select id="subtitleSelector" class="quality-selector"></select>
                     </div>
-                    <button id="pipBtn" class="action-btn" title="Bild-in-Bild">
+                    <button id="trailerBtn" class="action-btn" title="Trailer abspielen" tabindex="-1" style="display: none;">
+                        <i class="fas fa-film"></i> Trailer
+                    </button>
+                    <button id="pipBtn" class="action-btn" title="Bild-in-Bild" tabindex="-1">
                         <i class="fas fa-window-restore"></i> PiP
                     </button>
-                    <button id="fullscreenBtn" class="action-btn">
+                    <button id="fullscreenBtn" class="action-btn" tabindex="-1">
                         <i class="fas fa-expand"></i> Vollbild
                     </button>
-                    <button id="downloadBtn" class="action-btn">
+                    <button id="downloadBtn" class="action-btn" tabindex="-1">
                         <i class="fas fa-download"></i> Download
                     </button>
-                    <button id="shareBtn" class="action-btn">
+                    <button id="shareBtn" class="action-btn" tabindex="-1">
                         <i class="fas fa-share"></i> Teilen
                     </button>
                 </div>
             </div>
         </div>
+    </div>
     <!-- Sidebar Backdrop Overlay -->
     <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
 

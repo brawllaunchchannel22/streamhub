@@ -166,6 +166,71 @@ function removeVideoProgress(url) {
     } catch (e) {}
 }
 
+// --- Watchlist Helpers ---
+function getWatchlist() {
+    try {
+        return JSON.parse(localStorage.getItem('streamhubWatchlist') || '[]');
+    } catch (e) {
+        return [];
+    }
+}
+
+function isInWatchlist(item) {
+    const key = getVideoProgressKey(item);
+    return getWatchlist().some(i => getVideoProgressKey(i) === key);
+}
+
+function toggleWatchlist(item, btnEl) {
+    try {
+        let list = getWatchlist();
+        const key = getVideoProgressKey(item);
+        const idx = list.findIndex(i => getVideoProgressKey(i) === key);
+        const adding = idx === -1;
+        if (adding) {
+            list.unshift({ ...item, watchlistedAt: Date.now() });
+        } else {
+            list.splice(idx, 1);
+        }
+        localStorage.setItem('streamhubWatchlist', JSON.stringify(list));
+        if (btnEl) {
+            btnEl.classList.toggle('watchlist-active', adding);
+            btnEl.title = adding ? 'Von Merkliste entfernen' : 'Zur Merkliste hinzufügen';
+            // Bounce animation
+            btnEl.classList.remove('watchlist-bounce');
+            void btnEl.offsetWidth;
+            btnEl.classList.add('watchlist-bounce');
+        }
+        // Haptic
+        if (window._haptic) adding ? window._haptic.heavy() : window._haptic.tick();
+    } catch (e) {
+        console.error('toggleWatchlist error:', e);
+    }
+}
+
+function loadWatchlistPage() {
+    const grid = document.getElementById('watchlistGrid');
+    const empty = document.getElementById('watchlistEmpty');
+    if (!grid) return;
+    const list = getWatchlist();
+    grid.innerHTML = '';
+    if (list.length === 0) {
+        if (empty) empty.style.display = 'flex';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    list.forEach((item, index) => {
+        const card = createVideoCard(item, index);
+        grid.appendChild(card);
+    });
+}
+
+function clearWatchlist() {
+    if (confirm('Merkliste wirklich leeren?')) {
+        localStorage.removeItem('streamhubWatchlist');
+        loadWatchlistPage();
+    }
+}
+
 // Sender Colors
 const senderColors = {
     'ARD': ['#001d8f', '#0041c7'],
@@ -191,6 +256,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function init() {
     try {
+        // Apply theme early
+        const savedTheme = localStorage.getItem('selectedTheme') || 'dark';
+        applyTheme(savedTheme);
+
         // Get DOM elements
         searchInput = document.getElementById('searchInput');
         videoGrid = document.getElementById('videoGrid');
@@ -201,6 +270,22 @@ function init() {
         loadMore = document.getElementById('loadMore');
         videoModal = document.getElementById('videoModal');
         videoPlayer = document.getElementById('videoPlayer');
+        // Spacebar on the video element: stop native handling AND stop propagation
+        // so the document-level handler below doesn't double-fire.
+        if (videoPlayer) {
+            videoPlayer.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.repeat) return;
+                    if (videoPlayer.paused) {
+                        videoPlayer.play().catch(err => console.warn('Play failed:', err));
+                    } else {
+                        videoPlayer.pause();
+                    }
+                }
+            }, true); // useCapture = true to run before native shadow DOM controls
+        }
         closeModal = document.getElementById('closeModal');
         hamburgerMenu = document.getElementById('hamburgerMenu');
         closeHamburger = document.getElementById('closeHamburger');
@@ -218,8 +303,9 @@ function init() {
         
         console.log('DOM elements loaded');
         
-        // Apply Android Native Theme colors if available (Material You Dynamic Color)
-        if (window.AndroidNativeTheme && typeof window.AndroidNativeTheme.getSystemColors === 'function') {
+        // Apply Android Native Theme colors if available (Material You Dynamic Color) and system theme is selected
+        const currentTheme = localStorage.getItem('selectedTheme') || 'dark';
+        if (currentTheme === 'system' && window.AndroidNativeTheme && typeof window.AndroidNativeTheme.getSystemColors === 'function') {
             try {
                 const colorsJson = window.AndroidNativeTheme.getSystemColors();
                 const colors = JSON.parse(colorsJson);
@@ -354,6 +440,16 @@ function init() {
                     }
                 }
             });
+
+            videoPlayer.addEventListener('leavepictureinpicture', () => {
+                const videoModal = document.getElementById('videoModal');
+                if (videoModal && videoModal.classList.contains('active')) {
+                    const container = videoPlayer.closest('.video-player-container') || videoPlayer.parentElement;
+                    if (container && container.requestFullscreen) {
+                        container.requestFullscreen().catch(e => console.warn('requestFullscreen from PiP:', e));
+                    }
+                }
+            });
         }
         
         // Load settings and data
@@ -379,7 +475,7 @@ function init() {
 function attachEventListeners() {
     // Search
     if (searchInput) {
-        searchInput.addEventListener('keypress', (e) => {
+        searchInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && searchInput.value.trim()) {
                 performSearch(searchInput.value.trim());
             }
@@ -416,35 +512,51 @@ function attachEventListeners() {
             
             console.log('Nav clicked:', { category, page });
             
-            // Clear search input when clicking on navigation tabs
-            if (searchInput) {
-                searchInput.value = '';
-            }
-            
             if (page === 'live') {
                 navigateToPage('live');
             } else if (category === 'home') {
+                if (searchInput) searchInput.value = '';
                 navigateToPage('home');
             } else {
-                // Category search
+                // Category search — show home layout first WITHOUT loading default content, then search
+                const sections = [
+                    'mainVideoSection', 'historyPage', 'recentlyWatched', 'livePage',
+                    'localPage', 'localFolderDetailPage', 'seriesDetailPage',
+                    'settingsPage', 'watchlistPage', 'statsPage', 'abosPage', 'downloadsPage'
+                ];
+                sections.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
                 const mainVideoSection = document.getElementById('mainVideoSection');
-                const livePage = document.getElementById('livePage');
-                const localPage = document.getElementById('localPage');
-                const settingsPage = document.getElementById('settingsPage');
-                const historyPage = document.getElementById('historyPage');
-                const recentlyWatched = document.getElementById('recentlyWatched');
-                
                 if (mainVideoSection) mainVideoSection.style.display = 'block';
-                if (livePage) livePage.style.display = 'none';
-                if (localPage) localPage.style.display = 'none';
-                if (settingsPage) settingsPage.style.display = 'none';
-                if (historyPage) historyPage.style.display = 'none';
-                if (recentlyWatched) recentlyWatched.style.display = 'none';
-                
+                currentPage = 'home';
+                previousPage = currentPage;
+                if (searchInput) searchInput.value = category;
                 performSearch(category);
             }
         });
     });
+
+    // Search icon click triggers search
+    const searchIcon = document.querySelector('.search-box .fa-search');
+    if (searchIcon) {
+        searchIcon.style.cursor = 'pointer';
+        searchIcon.addEventListener('click', () => {
+            const val = searchInput ? searchInput.value.trim() : '';
+            if (val) performSearch(val);
+        });
+    }
+
+    // Logo click listener to return to start
+    const logoEl = document.querySelector('.logo');
+    if (logoEl) {
+        logoEl.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            document.querySelectorAll('.nav-categories a').forEach(l => l.classList.remove('active'));
+            const startTab = document.querySelector('.nav-categories a[data-category="home"]');
+            if (startTab) startTab.classList.add('active');
+            navigateToPage('home');
+        });
+    }
+    
     
     // Filter
     if (filterToggle) {
@@ -484,6 +596,26 @@ function attachEventListeners() {
             document.getElementById('durationFilter').value = '0';
             document.getElementById('sortFilter').value = 'date';
             applyFilters();
+        });
+    }
+
+    // Quick Subscribe from filter sidebar
+    const quickSubscribeBtn = document.getElementById('quickSubscribeBtn');
+    if (quickSubscribeBtn) {
+        quickSubscribeBtn.addEventListener('click', () => {
+            const channelInput = document.getElementById('channelFilter');
+            const searchInput = document.getElementById('searchInput');
+            const term = (channelInput && channelInput.value.trim()) || (searchInput && searchInput.value.trim()) || '';
+            if (!term) {
+                showNotification('Bitte zuerst einen Kanal oder Suchbegriff eingeben.', 'warning');
+                return;
+            }
+            // Use addAbo (the Abonnements system)
+            addAbo(term);
+            // Close filter sidebar
+            if (filterSidebar) filterSidebar.classList.remove('active');
+            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+            syncNativeBackHandler();
         });
     }
 
@@ -579,39 +711,141 @@ function attachEventListeners() {
     // Video controls
     const fullscreenBtn = document.getElementById('fullscreenBtn');
     if (fullscreenBtn) {
+        // Only intercept Spacebar — redirect to play/pause instead of triggering the button.
+        // Enter should still activate the button normally.
+        fullscreenBtn.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (videoPlayer) {
+                    videoPlayer.paused
+                        ? videoPlayer.play().catch(() => {})
+                        : videoPlayer.pause();
+                }
+                // Immediately blur so the button doesn't stay focused
+                fullscreenBtn.blur();
+            }
+        });
+
         fullscreenBtn.addEventListener('click', () => {
-            if (videoPlayer && videoPlayer.requestFullscreen) {
-                videoPlayer.requestFullscreen();
+            if (videoPlayer) {
+                if (document.fullscreenElement) {
+                    document.exitFullscreen().catch(e => console.warn('exitFullscreen:', e));
+                } else {
+                    const container = videoPlayer.closest('.video-player-container') || videoPlayer.parentElement;
+                    if (container && container.requestFullscreen) {
+                        container.requestFullscreen().catch(e => console.warn('requestFullscreen:', e));
+                    } else if (videoPlayer.requestFullscreen) {
+                        videoPlayer.requestFullscreen().catch(e => console.warn('requestFullscreen:', e));
+                    }
+                }
+            }
+            fullscreenBtn.blur();
+        });
+
+        // Update button icon whenever fullscreen state changes
+        document.addEventListener('fullscreenchange', () => {
+            if (document.fullscreenElement) {
+                fullscreenBtn.innerHTML = '<i class="fas fa-compress"></i> Vollbild';
+            } else {
+                fullscreenBtn.innerHTML = '<i class="fas fa-expand"></i> Vollbild';
+                fullscreenBtn.blur();
             }
         });
     }
+
     
     const downloadBtn = document.getElementById('downloadBtn');
     if (downloadBtn) {
-        downloadBtn.addEventListener('click', async () => {
-            const url = videoPlayer.src;
+        downloadBtn.addEventListener('click', (e) => {
             const title = document.getElementById('videoTitle')?.textContent || 'video';
-            
-            if (!url) {
-                alert('Keine Video-URL verfügbar');
+            const qualitySelector = document.getElementById('qualitySelector');
+            if (!qualitySelector) return;
+            const options = Array.from(qualitySelector.options);
+            if (options.length <= 1) {
+                const url = qualitySelector.value || videoPlayer.src;
+                if (!url) {
+                    showNotification('Keine Video-URL verfügbar.', 'warning');
+                    return;
+                }
+                startDownload(url, title);
+                showNotification(`⬇️ Download gestartet: „${title}"`, 'success', {
+                    text: 'Zu Downloads',
+                    callback: () => navigateToPage('downloads')
+                });
                 return;
             }
-            
-            // Use IPC if available
-            if (window.electronAPI) {
-                try {
-                    const result = await window.electronAPI.downloadVideo(url, title);
-                    
-                    if (result.success) {
-                        alert(`Video gespeichert:\n${result.path}`);
-                    } else {
-                        alert(`Download fehlgeschlagen: ${result.message}`);
+
+            // If there are multiple qualities, show a beautiful quality picker popover/dropdown!
+            const existingMenu = document.getElementById('downloadQualityMenu');
+            if (existingMenu) {
+                existingMenu.remove();
+                return;
+            }
+
+            const menu = document.createElement('div');
+            menu.id = 'downloadQualityMenu';
+            menu.style.cssText = `
+                position: absolute;
+                bottom: ${downloadBtn.offsetHeight + 10}px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(18, 18, 24, 0.98);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                padding: 6px;
+                box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                z-index: 10000;
+                min-width: 150px;
+            `;
+
+            options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.style.cssText = `
+                    background: transparent;
+                    border: none;
+                    color: #f8fafc;
+                    padding: 8px 12px;
+                    text-align: left;
+                    font-size: 0.85rem;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    transition: background 0.2s;
+                `;
+                btn.onmouseover = () => btn.style.background = 'rgba(255,255,255,0.08)';
+                btn.onmouseout = () => btn.style.background = 'transparent';
+                btn.innerHTML = `<span>${opt.textContent}</span> <i class="fas fa-download" style="opacity: 0.6; font-size: 0.8rem;"></i>`;
+                btn.addEventListener('click', () => {
+                    startDownload(opt.value, title);
+                    showNotification(`⬇️ Download gestartet (${opt.textContent}): „${title}"`, 'success', {
+                        text: 'Zu Downloads',
+                        callback: () => navigateToPage('downloads')
+                    });
+                    menu.remove();
+                });
+                menu.appendChild(btn);
+            });
+
+            const parent = downloadBtn.parentElement;
+            if (parent) {
+                const originalPos = parent.style.position;
+                parent.style.position = 'relative';
+                parent.appendChild(menu);
+
+                const closeHandler = (event) => {
+                    if (!menu.contains(event.target) && event.target !== downloadBtn) {
+                        menu.remove();
+                        document.removeEventListener('click', closeHandler);
+                        parent.style.position = originalPos;
                     }
-                } catch (err) {
-                    window.open(url, '_blank');
-                }
-            } else {
-                window.open(url, '_blank');
+                };
+                setTimeout(() => document.addEventListener('click', closeHandler), 10);
             }
         });
     }
@@ -640,6 +874,74 @@ function attachEventListeners() {
         });
     }
 
+    // Trailer Buttons
+    const trailerBtn = document.getElementById('trailerBtn');
+    const closeTrailerBtn = document.getElementById('closeTrailerBtn');
+    const trailerPlayerContainer = document.getElementById('trailerPlayerContainer');
+    const trailerPlayer = document.getElementById('trailerPlayer');
+    
+    if (trailerBtn) {
+        trailerBtn.addEventListener('click', async () => {
+            console.log('[TrailerBtn Click] currentPlayingVideo:', window.currentPlayingVideo);
+            if (!window.currentPlayingVideo) return;
+            // Pause main video
+            if (videoPlayer) videoPlayer.pause();
+            
+            // Show loading state
+            trailerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Suche...';
+            trailerBtn.disabled = true;
+            
+            try {
+                let trailerUrl = await fetchTrailerUrl(window.currentPlayingVideo.title, window.currentPlayingVideo.channel);
+                
+                // If TMDB didn't find an embeddable video, search YouTube programmatically using the Electron main process
+                if (!trailerUrl || trailerUrl === 'youtube_search') {
+                    console.log('[TrailerBtn Click] TMDB fallback or no match. Searching YouTube directly...');
+                    const cleanTitle = _cleanTitleForTmdb(window.currentPlayingVideo.title) || window.currentPlayingVideo.title.trim();
+                    const query = `${cleanTitle} Trailer Deutsch`;
+                    if (window.electronAPI && window.electronAPI.searchYoutubeTrailer) {
+                        const directUrl = await window.electronAPI.searchYoutubeTrailer(query);
+                        if (directUrl) {
+                            trailerUrl = directUrl;
+                        }
+                    }
+                }
+
+                if (trailerUrl && trailerUrl !== 'youtube_search') {
+                    if (trailerPlayer) trailerPlayer.src = trailerUrl;
+                    if (trailerPlayerContainer) trailerPlayerContainer.style.display = 'block';
+                } else {
+                    // Ultimate fallback: open YouTube search in the real system browser
+                    const cleanTitle = _cleanTitleForTmdb(window.currentPlayingVideo.title) || window.currentPlayingVideo.title.trim();
+                    const query = encodeURIComponent(cleanTitle + ' Trailer Deutsch');
+                    const ytUrl = `https://www.youtube.com/results?search_query=${query}`;
+                    if (window.electronAPI && window.electronAPI.openExternal) {
+                        window.electronAPI.openExternal(ytUrl);
+                    } else {
+                        window.open(ytUrl, '_blank');
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+                alert('Fehler beim Laden des Trailers.');
+            } finally {
+                trailerBtn.innerHTML = '<i class="fas fa-film"></i> Trailer';
+                trailerBtn.disabled = false;
+            }
+        });
+    }
+    
+    if (closeTrailerBtn) {
+        closeTrailerBtn.addEventListener('click', () => {
+            if (trailerPlayerContainer) trailerPlayerContainer.style.display = 'none';
+            if (trailerPlayer) trailerPlayer.src = '';
+            // Resume main video
+            if (videoPlayer && videoPlayer.paused && typeof videoPlayer.play === 'function') {
+                videoPlayer.play().catch(e => console.warn('Could not resume video:', e));
+            }
+        });
+    }
+
     // ─── Back Action Handler ────────────────────────────────────────────────────
     // Exposed as window._handleBackAction so MainActivity.java can call it via
     // evaluateJavascript when the native OnBackPressedCallback fires.
@@ -651,7 +953,11 @@ function attachEventListeners() {
         const infoModal       = document.getElementById('infoModal');
 
         if (videoModal && videoModal.classList.contains('active')) {
-            closeVideoModal();
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(e => console.warn('exitFullscreen on back:', e));
+            } else {
+                closeVideoModal();
+            }
             syncNativeBackHandler();
             return true;
         }
@@ -673,15 +979,21 @@ function attachEventListeners() {
             return true;
         }
 
-        const historyPage  = document.getElementById('historyPage');
-        const livePage     = document.getElementById('livePage');
-        const localPage    = document.getElementById('localPage');
-        const settingsPage = document.getElementById('settingsPage');
+        const historyPage   = document.getElementById('historyPage');
+        const livePage      = document.getElementById('livePage');
+        const localPage     = document.getElementById('localPage');
+        const settingsPage  = document.getElementById('settingsPage');
+        const watchlistPage = document.getElementById('watchlistPage');
+        const statsPage     = document.getElementById('statsPage');
+        const abosPage      = document.getElementById('abosPage');
         if (
-            (historyPage  && historyPage.style.display  === 'block') ||
-            (livePage     && livePage.style.display     === 'block') ||
-            (localPage    && localPage.style.display    === 'block') ||
-            (settingsPage && settingsPage.style.display === 'block')
+            (historyPage   && historyPage.style.display   === 'block') ||
+            (livePage      && livePage.style.display      === 'block') ||
+            (localPage     && localPage.style.display     === 'block') ||
+            (settingsPage  && settingsPage.style.display  === 'block') ||
+            (watchlistPage && watchlistPage.style.display === 'block') ||
+            (statsPage     && statsPage.style.display     === 'block')  ||
+            (abosPage      && abosPage.style.display      === 'block')
         ) {
             navigateToPage('home');
             syncNativeBackHandler();
@@ -691,10 +1003,67 @@ function attachEventListeners() {
         return false;
     };
 
-    // Keyboard Escape key (desktop / emulator)
+    // Keyboard Escape key and Spacebar (desktop / emulator)
+    // Using capturing phase (true) to intercept spacebar/escape before focused buttons can act on them.
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') window._handleBackAction();
-    });
+        if (e.key === 'Escape') {
+            window._handleBackAction();
+        }
+        
+        // Spacebar play/pause helper
+        if (e.code === 'Space' || e.key === ' ') {
+            const active = document.activeElement;
+            // Ignore if user is typing in form inputs
+            if (active && (
+                active.tagName === 'INPUT' ||
+                active.tagName === 'TEXTAREA' ||
+                active.tagName === 'SELECT' ||
+                active.isContentEditable
+            )) {
+                return;
+            }
+
+            const videoModal = document.getElementById('videoModal');
+            const trailerContainer = document.getElementById('trailerPlayerContainer');
+            // Only intercept when video modal is open AND the trailer overlay is NOT shown
+            if (videoModal && videoModal.classList.contains('active') &&
+                (!trailerContainer || trailerContainer.style.display === 'none')) {
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                // Ignore if the spacebar is being held down (key repeat)
+                if (e.repeat) {
+                    return;
+                }
+
+                // Blur any focused button or element to clear focus styles
+                if (active && active !== document.body) {
+                    active.blur();
+                }
+
+                if (videoPlayer) {
+                    if (videoPlayer.paused) {
+                        videoPlayer.play().catch(err => console.warn('Play failed:', err));
+                    } else {
+                        videoPlayer.pause();
+                    }
+                }
+            }
+        }
+    }, true);
+
+    // Blur any button/select shortly after being clicked to prevent focus styling "sticking"
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('button, select, input[type="button"], input[type="submit"]');
+        if (btn) {
+            setTimeout(() => {
+                if (document.activeElement === btn) {
+                    btn.blur();
+                }
+            }, 50);
+        }
+    }, true);
 
     // ─── Native Back Handler Sync ───────────────────────────────────────────────
     // Controls the native Android OnBackPressedCallback in MainActivity.java.
@@ -711,6 +1080,8 @@ function attachEventListeners() {
             const livePage        = document.getElementById('livePage');
             const localPage       = document.getElementById('localPage');
             const settingsPage    = document.getElementById('settingsPage');
+            const watchlistPage   = document.getElementById('watchlistPage');
+            const statsPage       = document.getElementById('statsPage');
 
             const needsHandler = Boolean(
                 (videoModal      && videoModal.classList.contains('active'))      ||
@@ -720,7 +1091,9 @@ function attachEventListeners() {
                 (historyPage     && historyPage.style.display     === 'block')    ||
                 (livePage        && livePage.style.display        === 'block')    ||
                 (localPage       && localPage.style.display       === 'block')    ||
-                (settingsPage    && settingsPage.style.display    === 'block')
+                (settingsPage    && settingsPage.style.display    === 'block')    ||
+                (watchlistPage   && watchlistPage.style.display   === 'block')    ||
+                (statsPage       && statsPage.style.display       === 'block')
             );
 
             AndroidNativeTheme.setBackHandlerEnabled(needsHandler);
@@ -744,7 +1117,8 @@ function attachEventListeners() {
         document.getElementById('historyPage'),
         document.getElementById('livePage'),
         document.getElementById('localPage'),
-        document.getElementById('settingsPage')
+        document.getElementById('settingsPage'),
+        document.getElementById('watchlistPage')
     ].forEach(el => {
         if (el) _backObserver.observe(el, { attributes: true, attributeFilter: ['style'] });
     });
@@ -821,6 +1195,12 @@ function attachEventListeners() {
         });
     }
     
+    // Watchlist clear button
+    const clearWatchlistBtn = document.getElementById('clearWatchlistBtn');
+    if (clearWatchlistBtn) {
+        clearWatchlistBtn.addEventListener('click', clearWatchlist);
+    }
+
     const clearCache = document.getElementById('clearCache');
     if (clearCache) {
         clearCache.addEventListener('click', () => {
@@ -913,8 +1293,10 @@ async function loadRecommendations() {
         
     } catch (error) {
         console.error('Recommendations error:', error);
-        // Fallback to Tatort if recommendations fail
-        await performSearch('Tatort');
+        // Fallback: show a variety of content
+        const fallbacks = ['Dokumentation', 'Spielfilm', 'Reportage', 'Nachrichten'];
+        const fallback = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+        await performSearch(fallback);
     } finally {
         showLoading(false);
     }
@@ -936,8 +1318,8 @@ async function performSearch(query) {
         currentOffset = 0;
         displayedResults = [];
         
-        // Hide verlauf when searching
-        if (recentlyWatched && query !== 'Tatort') {
+        // Hide recently watched when actively searching
+        if (recentlyWatched) {
             recentlyWatched.style.display = 'none';
         }
         
@@ -1555,6 +1937,7 @@ async function openSeriesDetail(seriesName, episodes) {
                 <span><i class="fas fa-layer-group"></i> ${totalSeasons} ${totalSeasons === 1 ? 'Staffel' : 'Staffeln'}</span>
                 <span><i class="fas fa-list"></i> ${episodes.length} Folgen</span>
                 ${tmdbDetails && tmdbDetails.first_air_date ? `<span><i class="fas fa-calendar"></i> ${tmdbDetails.first_air_date.split('-')[0]}</span>` : ''}
+                ${tmdbDetails && tmdbDetails.vote_average ? `<span><i class="fas fa-star" style="color:#eab308;"></i> ${tmdbDetails.vote_average.toFixed(1)}/10</span>` : ''}
             </div>
             <div class="series-info-description">
                 ${bestDescription.length > 400 ? bestDescription.substring(0, 400) + '...' : bestDescription}
@@ -1680,10 +2063,14 @@ function createVideoCard(item, index) {
         `;
     }
 
+    const inWL = isInWatchlist(item);
     card.innerHTML = `
         <div class="video-thumbnail" id="${thumbnailId}" style="background: ${gradient};">
             <span class="sender-logo thumb-overlay-logo">${item.channel}</span>
             <span class="duration-badge">${durationText}</span>
+            <button class="watchlist-btn${inWL ? ' watchlist-active' : ''}" title="${inWL ? 'Von Merkliste entfernen' : 'Zur Merkliste hinzufügen'}" aria-label="Merkliste">
+                <i class="fas fa-heart"></i>
+            </button>
             ${progressHTML}
         </div>
         <div class="video-card-content">
@@ -1696,6 +2083,14 @@ function createVideoCard(item, index) {
     `;
 
     card.addEventListener('click', () => playVideo(item));
+
+    const wlBtn = card.querySelector('.watchlist-btn');
+    if (wlBtn) {
+        wlBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleWatchlist(item, wlBtn);
+        });
+    }
 
     // Queue real thumbnail with stagger so cards don't all fire at once
     const videoUrl = item.url_video_low || item.url_video;
@@ -1746,6 +2141,61 @@ function playVideo(item) {
         if (channelEl) channelEl.textContent = item.channel;
         if (durationEl) durationEl.textContent = `${Math.round(item.duration / 60)} Min`;
         if (dateEl) dateEl.textContent = formatDate(new Date(item.timestamp * 1000));
+
+        const ratingEl = document.getElementById('videoRating');
+        // Build user star-rating widget
+        if (ratingEl) {
+            const ratingKey = 'rating_' + (item.id || encodeURIComponent(item.title || ''));
+            const savedRating = parseInt(localStorage.getItem(ratingKey) || '0', 10);
+            ratingEl.style.display = 'inline-flex';
+            ratingEl.style.alignItems = 'center';
+            ratingEl.style.gap = '2px';
+            ratingEl.style.cursor = 'pointer';
+            ratingEl.title = 'Bewertung abgeben';
+            const renderStars = (current) => {
+                ratingEl.innerHTML = '';
+                for (let i = 1; i <= 5; i++) {
+                    const star = document.createElement('i');
+                    star.className = i <= current ? 'fas fa-star' : 'far fa-star';
+                    star.style.cssText = `color:${i <= current ? '#eab308' : '#64748b'}; font-size:1rem; transition:color 0.15s;`;
+                    star.dataset.val = i;
+                    star.addEventListener('mouseenter', () => renderStars(i));
+                    star.addEventListener('mouseleave', () => renderStars(parseInt(localStorage.getItem(ratingKey) || '0', 10)));
+                    star.addEventListener('click', () => {
+                        localStorage.setItem(ratingKey, i);
+                        renderStars(i);
+                    });
+                    ratingEl.appendChild(star);
+                }
+                // Label
+                const lbl = document.createElement('span');
+                lbl.style.cssText = 'font-size:0.75rem; color:#94a3b8; margin-left:4px;';
+                lbl.textContent = current > 0 ? current + '/5' : 'Bewerten';
+                ratingEl.appendChild(lbl);
+            };
+            renderStars(savedRating);
+        }
+
+        // Fetch TMDb rating if API key is set (shows alongside user rating)
+        const apiKey = localStorage.getItem('tmdbApiKey') || '';
+        if (apiKey && apiKey !== 'YOUR_API_KEY_HERE' && item.title && !item.isLocal) {
+            const cleanTitle = _cleanTitleForTmdb(item.title) || item.title.trim();
+            fetch(`${TMDB_BASE_URL}/search/multi?api_key=${apiKey}&language=de-DE&query=${encodeURIComponent(cleanTitle)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.results && data.results.length > 0) {
+                        const match = data.results.find(r => r.vote_average > 0);
+                        if (match && ratingEl) {
+                            // Append TMDb badge after stars
+                            const tmdbBadge = document.createElement('span');
+                            tmdbBadge.style.cssText = 'font-size:0.75rem; color:#94a3b8; margin-left:8px; background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:4px;';
+                            tmdbBadge.innerHTML = `<i class="fas fa-film" style="margin-right:3px;"></i>${match.vote_average.toFixed(1)}/10`;
+                            ratingEl.appendChild(tmdbBadge);
+                        }
+                    }
+                })
+                .catch(err => console.warn('TMDb live rating fetch error:', err));
+        }
         
         // Full description with "Mehr" button
         const description = item.description || item.topic || 'Keine Beschreibung';
@@ -1767,6 +2217,16 @@ function playVideo(item) {
         // Store current video URL for share button
         window.currentVideoUrl = videoUrl;
         window.currentVideoTitle = item.title;
+
+        // Show/hide trailer button
+        const trailerBtn = document.getElementById('trailerBtn');
+        if (trailerBtn) {
+            if (item.title && !item.isLocal) {
+                trailerBtn.style.display = 'inline-flex';
+            } else {
+                trailerBtn.style.display = 'none';
+            }
+        }
         
         // Setup quality selector
         const qualitySelector = document.getElementById('qualitySelector');
@@ -1982,6 +2442,16 @@ function closeVideoModal() {
             hlsInstance.destroy();
             hlsInstance = null;
         }
+        
+        // Stop and hide trailer
+        const trailerPlayerContainer = document.getElementById('trailerPlayerContainer');
+        const trailerPlayer = document.getElementById('trailerPlayer');
+        if (trailerPlayerContainer) trailerPlayerContainer.style.display = 'none';
+        if (trailerPlayer) trailerPlayer.src = '';
+        
+        // Reset focus to body so that lingering focus is cleared
+        document.body.focus();
+        
         syncNativeBackHandler();
     } catch (error) {
         console.error('Close modal error:', error);
@@ -2169,6 +2639,10 @@ function displayMoreResults() {
 function navigateToPage(page) {
     if (page !== currentPage) {
         previousPage = currentPage;
+        // Close video player modal when navigating away
+        if (typeof closeVideoModal === 'function') {
+            closeVideoModal();
+        }
     }
     currentPage = page;
     console.log('navigateToPage to:', page);
@@ -2181,7 +2655,11 @@ function navigateToPage(page) {
         'localPage',
         'localFolderDetailPage',
         'seriesDetailPage',
-        'settingsPage'
+        'settingsPage',
+        'watchlistPage',
+        'statsPage',
+        'abosPage',
+        'downloadsPage'
     ];
 
     // Hide all sections first
@@ -2206,6 +2684,7 @@ function navigateToPage(page) {
         const livePage = document.getElementById('livePage');
         if (livePage) livePage.style.display = 'block';
         loadLiveChannels();
+        loadEPG();
     } else if (page === 'local') {
         const localPage = document.getElementById('localPage');
         if (localPage) localPage.style.display = 'block';
@@ -2220,6 +2699,24 @@ function navigateToPage(page) {
     } else if (page === 'localFolderDetail') {
         const localFolderDetailPage = document.getElementById('localFolderDetailPage');
         if (localFolderDetailPage) localFolderDetailPage.style.display = 'block';
+    } else if (page === 'watchlist') {
+        const watchlistPage = document.getElementById('watchlistPage');
+        if (watchlistPage) watchlistPage.style.display = 'block';
+        loadWatchlistPage();
+    } else if (page === 'stats') {
+        const statsPage = document.getElementById('statsPage');
+        if (statsPage) statsPage.style.display = 'block';
+        loadStatsPage();
+    } else if (page === 'abos') {
+        const abosPage = document.getElementById('abosPage');
+        if (abosPage) abosPage.style.display = 'block';
+        initAbosPage();
+        loadAbosPage();
+    } else if (page === 'downloads') {
+        const downloadsPage = document.getElementById('downloadsPage');
+        if (downloadsPage) downloadsPage.style.display = 'block';
+        initDownloadsPage();
+        renderDownloadsPage();
     }
 
     // Update active nav links / hamburger items
@@ -3030,6 +3527,22 @@ function loadSettings() {
     if (settingRealThumbnails) settingRealThumbnails.checked = useRealThumbnails;
     if (realThumbnailsToggle) realThumbnailsToggle.checked = useRealThumbnails;
 
+    // Theme setting
+    const savedTheme = localStorage.getItem('selectedTheme') || 'dark';
+    const settingTheme = document.getElementById('settingTheme');
+    if (settingTheme) {
+        settingTheme.value = savedTheme;
+        if (!settingTheme._bound) {
+            settingTheme._bound = true;
+            settingTheme.addEventListener('change', (e) => {
+                const theme = e.target.value;
+                console.log('Theme changed to:', theme);
+                localStorage.setItem('selectedTheme', theme);
+                applyTheme(theme);
+            });
+        }
+    }
+
     // TMDB key
     const savedKey = localStorage.getItem('tmdbApiKey') || '';
     TMDB_API_KEY = savedKey;
@@ -3059,7 +3572,7 @@ function loadSettings() {
         });
     }
 
-    console.log('Settings loaded:', { useRealThumbnails, tmdbKeySet: !!TMDB_API_KEY });
+    console.log('Settings loaded:', { useRealThumbnails, tmdbKeySet: !!TMDB_API_KEY, theme: savedTheme });
 }
 
 function saveSettings() {
@@ -3318,7 +3831,8 @@ const tmdbSeriesCache = new Map();
 // Search for a series on TMDB
 async function searchTMDBSeries(seriesName) {
     // Check if API key is configured
-    if (TMDB_API_KEY === 'YOUR_API_KEY_HERE') {
+    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || TMDB_API_KEY || '';
+    if (!TMDB_API_KEY || TMDB_API_KEY === 'YOUR_API_KEY_HERE') {
         console.log('TMDB API key not configured');
         return null;
     }
@@ -3360,7 +3874,8 @@ async function searchTMDBSeries(seriesName) {
 // Get detailed series information from TMDB
 async function getTMDBSeriesDetails(seriesId) {
     // Check if API key is configured
-    if (TMDB_API_KEY === 'YOUR_API_KEY_HERE') {
+    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || TMDB_API_KEY || '';
+    if (!TMDB_API_KEY || TMDB_API_KEY === 'YOUR_API_KEY_HERE') {
         return null;
     }
     
@@ -3405,3 +3920,990 @@ function getTMDBBackdropURL(backdropPath, size = 'w1280') {
 }
 
 console.log('TMDB API integration loaded (configure API key to enable)!');
+
+// ===== THEME WECHSLER =====
+function applyTheme(theme) {
+    if (theme === 'system' || !theme) {
+        document.documentElement.removeAttribute('data-theme');
+        // Re-apply Android Native Theme colors if available
+        if (window.AndroidNativeTheme && typeof window.AndroidNativeTheme.getSystemColors === 'function') {
+            try {
+                const colorsJson = window.AndroidNativeTheme.getSystemColors();
+                const colors = JSON.parse(colorsJson);
+                if (colors.primary) document.documentElement.style.setProperty('--primary-color', colors.primary);
+                if (colors.primaryHover) document.documentElement.style.setProperty('--primary-hover', colors.primaryHover);
+                if (colors.background) {
+                    document.documentElement.style.setProperty('--background', colors.background);
+                    document.body.style.backgroundColor = colors.background;
+                }
+                if (colors.surface) {
+                    const hexToRgb = (hex) => {
+                        var shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+                        hex = hex.replace(shorthandRegex, function(m, r, g, b) { return r + r + g + g + b + b; });
+                        var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                        return result ? parseInt(result[1], 16) + ',' + parseInt(result[2], 16) + ',' + parseInt(result[3], 16) : '24,24,27';
+                    };
+                    const rgbVal = hexToRgb(colors.surface);
+                    document.documentElement.style.setProperty('--surface', `rgba(${rgbVal}, 0.65)`);
+                    document.documentElement.style.setProperty('--surface-glass', `rgba(${rgbVal}, 0.45)`);
+                }
+            } catch(e) {}
+        }
+    } else {
+        document.documentElement.setAttribute('data-theme', theme);
+        // Remove overrides so theme CSS takes full control
+        document.documentElement.style.removeProperty('--primary-color');
+        document.documentElement.style.removeProperty('--primary-hover');
+        document.documentElement.style.removeProperty('--background');
+        document.documentElement.style.removeProperty('--surface');
+        document.documentElement.style.removeProperty('--surface-glass');
+        document.body.style.backgroundColor = '';
+    }
+}
+
+// ===== STATISTIKEN =====
+function loadStatsPage() {
+    const recent = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
+    const progressMap = JSON.parse(localStorage.getItem('videoProgressMap') || '{}');
+    
+    // 1. Wiedergabezeit
+    let totalSeconds = 0;
+    Object.values(progressMap).forEach(prog => {
+        if (prog && typeof prog.currentTime === 'number') {
+            totalSeconds += prog.currentTime;
+        }
+    });
+    const hours = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    let watchTimeStr = '';
+    if (hours > 0) {
+        watchTimeStr = `${hours} Std. ${mins} Min.`;
+    } else {
+        watchTimeStr = `${mins} Min.`;
+    }
+    document.getElementById('statsWatchTime').textContent = totalSeconds > 0 ? watchTimeStr : '0 Min.';
+    
+    // 2. Angesehene Videos
+    document.getElementById('statsVideoCount').textContent = recent.length;
+    
+    // 3. Aktivitäts-Streak
+    let streak = 0;
+    if (recent.length > 0) {
+        const days = new Set();
+        recent.forEach(item => {
+            if (item.watchedAt) {
+                const dateStr = new Date(item.watchedAt).toDateString();
+                days.add(dateStr);
+            }
+        });
+        
+        let checkDate = new Date();
+        while (true) {
+            const checkStr = checkDate.toDateString();
+            if (days.has(checkStr)) {
+                streak++;
+                checkDate.setDate(checkDate.getDate() - 1);
+            } else {
+                if (streak === 0) {
+                    checkDate.setDate(checkDate.getDate() - 1);
+                    const yesterdayStr = checkDate.toDateString();
+                    if (days.has(yesterdayStr)) {
+                        checkDate.setDate(checkDate.getDate() - 1);
+                        streak = 1;
+                        continue;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    document.getElementById('statsStreak').textContent = `${streak} ${streak === 1 ? 'Tag' : 'Tage'}`;
+    
+    // 4. Lieblingssender & Top Charts
+    const channels = {};
+    const topics = {};
+    recent.forEach(item => {
+        if (item.channel) {
+            channels[item.channel] = (channels[item.channel] || 0) + 1;
+        }
+        if (item.topic) {
+            topics[item.topic] = (topics[item.topic] || 0) + 1;
+        }
+    });
+    
+    let favChannel = '-';
+    let maxChanVal = 0;
+    Object.entries(channels).forEach(([chan, count]) => {
+        if (count > maxChanVal) {
+            maxChanVal = count;
+            favChannel = chan;
+        }
+    });
+    document.getElementById('statsFavChannel').textContent = favChannel;
+    
+    // Chart Top Sender
+    const topChannelsContainer = document.getElementById('statsTopChannels');
+    topChannelsContainer.innerHTML = '';
+    const sortedChannels = Object.entries(channels).sort((a,b) => b[1] - a[1]).slice(0, 5);
+    if (sortedChannels.length === 0) {
+        topChannelsContainer.innerHTML = '<div class="empty-stats-msg">Noch keine Daten vorhanden</div>';
+    } else {
+        const maxVal = sortedChannels[0][1];
+        sortedChannels.forEach(([chan, count]) => {
+            const pct = Math.round((count / maxVal) * 100);
+            const row = document.createElement('div');
+            row.className = 'chart-bar-row';
+            row.innerHTML = `
+                <div class="chart-bar-label">${chan}</div>
+                <div class="chart-bar-wrapper">
+                    <div class="chart-bar-fill" style="width: ${pct}%;"></div>
+                </div>
+                <div class="chart-bar-value">${count}x</div>
+            `;
+            topChannelsContainer.appendChild(row);
+        });
+    }
+    
+    // Chart Top Themen
+    const topTopicsContainer = document.getElementById('statsTopTopics');
+    topTopicsContainer.innerHTML = '';
+    const sortedTopics = Object.entries(topics).sort((a,b) => b[1] - a[1]).slice(0, 5);
+    if (sortedTopics.length === 0) {
+        topTopicsContainer.innerHTML = '<div class="empty-stats-msg">Noch keine Daten vorhanden</div>';
+    } else {
+        const maxVal = sortedTopics[0][1];
+        sortedTopics.forEach(([topic, count]) => {
+            const pct = Math.round((count / maxVal) * 100);
+            const row = document.createElement('div');
+            row.className = 'chart-bar-row';
+            row.innerHTML = `
+                <div class="chart-bar-label">${topic}</div>
+                <div class="chart-bar-wrapper">
+                    <div class="chart-bar-fill theme-secondary" style="width: ${pct}%;"></div>
+                </div>
+                <div class="chart-bar-value">${count}x</div>
+            `;
+            topTopicsContainer.appendChild(row);
+        });
+    }
+}
+
+// ===== TRAILER HOOK =====
+
+/**
+ * Strips broadcast-related suffixes/noise from a Mediathek title so we can
+ * look it up on TMDB more accurately.
+ * e.g. "Tatort: Das schwarze Blut (HD)" → "Tatort: Das schwarze Blut"
+ *      "Die Sendung mit der Maus – Folge 42 Hörfassung" → "Die Sendung mit der Maus"
+ */
+function _cleanTitleForTmdb(raw) {
+    return raw
+        // Remove quality/format tags
+        .replace(/\b(HD|SD|4K|MPEG4?|UHD|HFR)\b/gi, '')
+        // Remove accessibility variants
+        .replace(/\b(Hörfassung|Audiodeskription|Gebärdensprache|Untertitel|Subtitles|Originalton)\b/gi, '')
+        // Remove episode info like " – Folge 12", " (Teil 2)", " - Episode 3"
+        .replace(/[-–]?\s*(Folge|Episode|Teil|Part|Staffel|Season|Series)\s*\d+\b[^,]*/gi, '')
+        // Remove trailing date patterns like "(2024)" unless the title IS just a year
+        .replace(/\(\d{4}\)/, '')
+        // Remove multiple spaces
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
+/** Compare two strings case-insensitively, returns similarity 0-1 */
+function _titleSimilarity(a, b) {
+    a = a.toLowerCase().trim();
+    b = b.toLowerCase().trim();
+    if (a === b) return 1;
+    // Starts-with check (handles subtitle after colon)
+    if (a.startsWith(b) || b.startsWith(a)) return 0.9;
+    // Check if query is contained
+    const shorter = a.length < b.length ? a : b;
+    const longer  = a.length < b.length ? b : a;
+    if (longer.includes(shorter)) return 0.7;
+    return 0;
+}
+
+async function fetchTrailerUrl(title, channel) {
+    console.log('[fetchTrailerUrl] title input:', title, 'channel:', channel);
+    
+    // Always sync TMDB_API_KEY with localStorage first
+    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || TMDB_API_KEY || '';
+    
+    if (!TMDB_API_KEY || TMDB_API_KEY === 'YOUR_API_KEY_HERE') {
+        console.warn('TMDB Key not set or default placeholder. Key:', TMDB_API_KEY);
+        return 'youtube_search';
+    }
+    try {
+        const cleanTitle = _cleanTitleForTmdb(title);
+        console.log('[fetchTrailerUrl] cleanTitle:', cleanTitle);
+
+        // Helper: pick the best-matching result from a TMDB result array.
+        // Accepts result[0] unless there's a clearly unrelated result.
+        function _bestMatch(results, nameKey) {
+            if (!results || results.length === 0) return null;
+            const scored = results.map(r => ({
+                r,
+                score: _titleSimilarity(cleanTitle, r[nameKey] || '')
+            }));
+            scored.sort((a, b) => b.score - a.score);
+            // Accept any result as long as there's at least some word overlap (score > 0)
+            // or fall back to the first result if the title is completely contained somewhere
+            if (scored[0].score > 0) return scored[0].r;
+            // Last resort: if cleanTitle words appear anywhere in the result title, accept it
+            const words = cleanTitle.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+            const bestByWord = results.find(r =>
+                words.some(w => (r[nameKey] || '').toLowerCase().includes(w))
+            );
+            return bestByWord || null;
+        }
+
+        let id = null;
+        let isTV = true;
+
+        // --- TV search ---
+        let url = `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&language=de-DE&query=${encodeURIComponent(cleanTitle)}`;
+        let response = await fetch(url);
+        let data = await response.json();
+        console.log('[fetchTrailerUrl] TV Search results count:', data.results ? data.results.length : 0);
+        const tvMatch = _bestMatch(data.results, 'name');
+        if (tvMatch) {
+            id = tvMatch.id;
+            console.log('[fetchTrailerUrl] TV ID found:', id, 'Name:', tvMatch.name);
+        }
+
+        if (!id) {
+            // --- Movie search ---
+            url = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&language=de-DE&query=${encodeURIComponent(cleanTitle)}`;
+            response = await fetch(url);
+            data = await response.json();
+            console.log('[fetchTrailerUrl] Movie Search results count:', data.results ? data.results.length : 0);
+            const movieMatch = _bestMatch(data.results, 'title');
+            if (movieMatch) {
+                id = movieMatch.id;
+                isTV = false;
+                console.log('[fetchTrailerUrl] Movie ID found:', id, 'Title:', movieMatch.title);
+            }
+        }
+
+        if (!id) {
+            console.log('[fetchTrailerUrl] No match found on TMDB for:', cleanTitle);
+            return 'youtube_search';
+        }
+
+        const typeStr = isTV ? 'tv' : 'movie';
+        // Get Videos (German first)
+        url = `${TMDB_BASE_URL}/${typeStr}/${id}/videos?api_key=${TMDB_API_KEY}&language=de-DE`;
+        response = await fetch(url);
+        data = await response.json();
+        let videos = data.results || [];
+
+        // Fallback to English if no German videos found
+        if (videos.length === 0) {
+            url = `${TMDB_BASE_URL}/${typeStr}/${id}/videos?api_key=${TMDB_API_KEY}`;
+            response = await fetch(url);
+            data = await response.json();
+            videos = data.results || [];
+        }
+
+        // Prefer official Trailer, then Teaser
+        const youtubeTrailer =
+            videos.find(v => v.site === 'YouTube' && v.type === 'Trailer' && v.official) ||
+            videos.find(v => v.site === 'YouTube' && v.type === 'Trailer') ||
+            videos.find(v => v.site === 'YouTube' && v.type === 'Teaser');
+
+        if (youtubeTrailer) {
+            console.log('[fetchTrailerUrl] Found trailer key:', youtubeTrailer.key, 'Name:', youtubeTrailer.name);
+            return `https://www.youtube-nocookie.com/embed/${youtubeTrailer.key}?autoplay=1`;
+        } else {
+            console.log('[fetchTrailerUrl] No YouTube trailer/teaser in videos list.');
+            return 'youtube_search';
+        }
+    } catch (e) {
+        console.error('Error fetching trailer:', e);
+        return 'youtube_search';
+    }
+}
+
+
+// ============================================================
+// ===== ABONNEMENTS / MERKE-SUCHE  ===========================
+// ============================================================
+
+function getAbos() {
+    try { return JSON.parse(localStorage.getItem('streamhub_abos') || '[]'); }
+    catch { return []; }
+}
+
+function saveAbos(abos) {
+    localStorage.setItem('streamhub_abos', JSON.stringify(abos));
+}
+
+function loadAbosPage() {
+    const abos = getAbos();
+    const abosList = document.getElementById('abosList');
+    const abosEmpty = document.getElementById('abosEmpty');
+    if (!abosList) return;
+
+    abosList.innerHTML = '';
+
+    if (abos.length === 0) {
+        if (abosEmpty) abosEmpty.style.display = 'flex';
+        return;
+    }
+    if (abosEmpty) abosEmpty.style.display = 'none';
+
+    abos.forEach((abo, idx) => {
+        const card = document.createElement('div');
+        card.className = 'abo-card';
+        const date = abo.addedAt ? new Date(abo.addedAt).toLocaleDateString('de-DE') : '';
+        card.innerHTML = `
+            <div class="abo-card-left">
+                <i class="fas fa-bell"></i>
+                <div>
+                    <div class="abo-term">${abo.term}</div>
+                    ${date ? `<div class="abo-meta">Abonniert seit ${date}</div>` : ''}
+                </div>
+            </div>
+            <div class="abo-actions">
+                <button class="abo-search-btn" data-term="${abo.term}" title="Jetzt suchen">
+                    <i class="fas fa-search"></i> Suchen
+                </button>
+                <button class="abo-delete-btn" data-idx="${idx}" title="Entfernen">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `;
+
+        card.querySelector('.abo-search-btn').addEventListener('click', (e) => {
+            const term = e.currentTarget.dataset.term;
+            // Navigate to home layout without triggering loadDefaultContent
+            const sections = [
+                'mainVideoSection', 'historyPage', 'recentlyWatched', 'livePage',
+                'localPage', 'localFolderDetailPage', 'seriesDetailPage',
+                'settingsPage', 'watchlistPage', 'statsPage', 'abosPage', 'downloadsPage'
+            ];
+            sections.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+            const mainVideoSection = document.getElementById('mainVideoSection');
+            if (mainVideoSection) mainVideoSection.style.display = 'block';
+            currentPage = 'home';
+            const inp = document.getElementById('searchInput');
+            if (inp) inp.value = term;
+            performSearch(term);
+        });
+
+        card.querySelector('.abo-delete-btn').addEventListener('click', (e) => {
+            const i = parseInt(e.currentTarget.dataset.idx);
+            const current = getAbos();
+            current.splice(i, 1);
+            saveAbos(current);
+            loadAbosPage();
+        });
+
+        abosList.appendChild(card);
+    });
+}
+
+function addAbo(term) {
+    term = term.trim();
+    if (!term) return;
+    const abos = getAbos();
+    if (abos.some(a => a.term.toLowerCase() === term.toLowerCase())) {
+        showNotification(`„${term}" ist bereits abonniert.`, 'info');
+        return;
+    }
+    abos.push({ term, addedAt: Date.now(), lastSeen: null });
+    saveAbos(abos);
+    showNotification(`✅ „${term}" abonniert!`, 'success');
+    loadAbosPage();
+}
+
+function initAbosPage() {
+    const addBtn = document.getElementById('aboAddBtn');
+    const input  = document.getElementById('aboSearchInput');
+    if (!addBtn || input._aboBound) return;
+    input._aboBound = true;
+
+    const doAdd = () => {
+        if (input.value.trim()) {
+            addAbo(input.value);
+            input.value = '';
+        }
+    };
+
+    addBtn.addEventListener('click', doAdd);
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') doAdd();
+    });
+}
+
+// Check all abos for new content and show notifications
+async function checkAbosForNewContent() {
+    const abos = getAbos();
+    if (abos.length === 0) return;
+
+    const banner = document.getElementById('aboNotifications');
+    // Only run once per session
+    if (window._abosChecked) return;
+    window._abosChecked = true;
+
+    const results = [];
+    for (const abo of abos) {
+        try {
+            const url = `https://mediathekviewweb.de/api/query?queries=%5B%7B%22fields%22%3A%5B%22title%22%2C%22topic%22%5D%2C%22query%22%3A%22${encodeURIComponent(abo.term)}%22%7D%5D&sortBy=timestamp&sortOrder=desc&future=false&offset=0&size=3`;
+            const res = await fetch(url);
+            const data = await res.json();
+            const items = data.result?.results || [];
+            if (items.length === 0) continue;
+
+            const newest = items[0];
+            const newestTs = newest.timestamp || 0;
+            const lastSeen = abo.lastSeen || 0;
+
+            if (newestTs > lastSeen) {
+                results.push({ term: abo.term, count: items.length, title: newest.title });
+            }
+
+            // Update lastSeen
+            abo.lastSeen = newestTs;
+        } catch { /* ignore network errors */ }
+    }
+
+    saveAbos(abos); // persist updated lastSeen
+
+    if (results.length > 0 && banner) {
+        banner.style.display = 'flex';
+        banner.innerHTML = '';
+        results.forEach(r => {
+            const div = document.createElement('div');
+            div.className = 'abo-notification-banner';
+            div.innerHTML = `
+                <i class="fas fa-bell"></i>
+                <span>Neu bei <strong>"${r.term}"</strong>: ${r.count} neue Inhalte — z.B. „${r.title}"</span>
+            `;
+            banner.appendChild(div);
+        });
+    }
+}
+
+// Run abo check shortly after app starts
+setTimeout(checkAbosForNewContent, 3000);
+
+
+// ============================================================
+// ===== EPG - Elektronischer Programmführer  =================
+// ============================================================
+
+// Simple time-based EPG: shows "now playing" approximation from a known schedule.
+// Uses the open EPG API from xmltv.se for German channels where available.
+async function loadEPG() {
+    const epgContainer = document.getElementById('liveEpgContainer');
+    if (!epgContainer) return;
+
+    epgContainer.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:0.5rem 0;"><i class="fas fa-spinner fa-spin"></i> Lade Programm...</p>';
+
+    // Map channel names to xmltv.se IDs (German public channels)
+    const epgChannelMap = [
+        { name: 'Das Erste HD',  id: 'das-erste.de' },
+        { name: 'ZDF HD',        id: 'zdf.de' },
+        { name: 'ARD alpha',     id: 'ard-alpha.de' },
+        { name: '3sat HD',       id: '3sat.de' },
+        { name: 'ZDFneo',        id: 'zdfneo.de' },
+        { name: 'ARTE',          id: 'arte.de' },
+        { name: 'Phoenix HD',    id: 'phoenix.de' },
+        { name: 'tagesschau24',  id: 'tagesschau24.de' },
+    ];
+
+    const now = new Date();
+    const pad = n => String(n).padStart(2,'0');
+    const todayStr = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}`;
+
+    let rows = '';
+    let fetchedAny = false;
+
+    for (const ch of epgChannelMap) {
+        try {
+            const res = await fetch(`https://xmltv.se/${ch.id}/${todayStr}.json`, { signal: AbortSignal.timeout(4000) });
+            if (!res.ok) continue;
+            const data = await res.json();
+            const programmes = data.programmes || [];
+
+            // Find current programme
+            const nowMs = now.getTime();
+            const current = programmes.find(p => {
+                const start = new Date(p.start).getTime();
+                const stop  = new Date(p.stop).getTime();
+                return nowMs >= start && nowMs < stop;
+            });
+
+            const next = current ? programmes[programmes.indexOf(current) + 1] : null;
+
+            if (!current) continue;
+            fetchedAny = true;
+
+            const startTime = new Date(current.start);
+            const timeStr = `${pad(startTime.getHours())}:${pad(startTime.getMinutes())}`;
+
+            rows += `
+                <div class="epg-row">
+                    <div class="epg-channel-name">${ch.name}</div>
+                    <div class="epg-now">
+                        <div class="epg-title">${current.title || '–'}</div>
+                        <div class="epg-time"><i class="fas fa-circle" style="font-size:0.5rem;vertical-align:middle;color:#22c55e;"></i> Seit ${timeStr}</div>
+                    </div>
+                    <div class="epg-next">${next ? `<i class="fas fa-arrow-right" style="font-size:0.7rem;margin-right:4px;opacity:0.5;"></i>${next.title}` : ''}</div>
+                </div>`;
+        } catch { /* timeout/network — skip channel */ }
+    }
+
+    if (!fetchedAny) {
+        epgContainer.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;padding:0.5rem 0;">Programmdaten konnten nicht geladen werden.</p>';
+        return;
+    }
+
+    epgContainer.innerHTML = `
+        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:0.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;">
+            <i class="fas fa-tv" style="color:var(--primary-color);margin-right:0.4rem;"></i>Jetzt im TV
+        </h3>
+        <div class="epg-strip">${rows}</div>
+    `;
+}
+
+// ===== DOWNLOAD MANAGER =========================================
+
+const DL_STORAGE_KEY = 'streamhub_downloads';
+
+function getDownloads() {
+    try { return JSON.parse(localStorage.getItem(DL_STORAGE_KEY) || '[]'); }
+    catch { return []; }
+}
+
+function saveDownloads(list) {
+    localStorage.setItem(DL_STORAGE_KEY, JSON.stringify(list));
+}
+
+function generateDlId() {
+    return 'dl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+}
+
+// Active XHR map so we can abort
+const _activeXHR = {};
+
+function startDownload(url, title) {
+    const id = generateDlId();
+    const safeTitle = title.replace(/[/\\?%*:|"<>]/g, '-').trim() || 'video';
+    const ext = url.split('?')[0].split('.').pop().toLowerCase();
+    const filename = safeTitle + '.' + (ext.length <= 4 ? ext : 'mp4');
+
+    const entry = {
+        id,
+        title: safeTitle,
+        filename,
+        url,
+        status: 'active',   // active | completed | error | cancelled
+        progress: 0,
+        bytesLoaded: 0,
+        bytesTotal: 0,
+        startedAt: Date.now(),
+        completedAt: null,
+        error: null,
+        objectUrl: null
+    };
+
+    const list = getDownloads();
+    list.unshift(entry);
+    saveDownloads(list);
+    renderDownloadsPage();
+
+    // If Electron IPC is available use it for real filesystem download
+    if (window.electronAPI && window.electronAPI.downloadVideo) {
+        window.electronAPI.downloadVideo(url, safeTitle)
+            .then(result => {
+                _updateDl(id, result.success
+                    ? { status: 'completed', progress: 100, completedAt: Date.now() }
+                    : { status: 'error', error: result.message || 'Fehler beim Download' });
+            })
+            .catch(err => _updateDl(id, { status: 'error', error: err.message }));
+        return;
+    }
+
+    // Browser fallback: fetch with XHR for progress tracking
+    const xhr = new XMLHttpRequest();
+    _activeXHR[id] = xhr;
+    xhr.open('GET', url, true);
+    xhr.responseType = 'blob';
+
+    let lastLoaded = 0;
+    let lastTime = Date.now();
+
+    xhr.onprogress = (e) => {
+        const now = Date.now();
+        const elapsed = (now - lastTime) / 1000; // seconds
+        const speedBps = elapsed > 0 ? (e.loaded - lastLoaded) / elapsed : 0;
+        lastLoaded = e.loaded;
+        lastTime = now;
+
+        const pct = e.lengthComputable ? Math.round((e.loaded / e.total) * 100) : -1;
+        _updateDl(id, {
+            progress: pct >= 0 ? pct : entry.progress,
+            bytesLoaded: e.loaded,
+            bytesTotal: e.total,
+            speed: speedBps
+        });
+    };
+
+    xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+            const blob = xhr.response;
+            const objectUrl = URL.createObjectURL(blob);
+            // Auto-trigger browser save dialog
+            const a = document.createElement('a');
+            a.href = objectUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            _updateDl(id, { status: 'completed', progress: 100, completedAt: Date.now(), objectUrl, speed: 0 });
+            showNotification(`✅ Download abgeschlossen: „${safeTitle}"`, 'success', {
+                text: 'Zu Downloads',
+                callback: () => navigateToPage('downloads')
+            });
+        } else {
+            _updateDl(id, { status: 'error', error: `HTTP ${xhr.status}`, speed: 0 });
+        }
+        delete _activeXHR[id];
+    };
+
+    xhr.onerror = () => {
+        _updateDl(id, { status: 'error', error: 'Netzwerkfehler', speed: 0 });
+        delete _activeXHR[id];
+    };
+
+    xhr.onabort = () => {
+        _updateDl(id, { status: 'cancelled', error: 'Abgebrochen', speed: 0 });
+        delete _activeXHR[id];
+    };
+
+    xhr.send();
+}
+
+function _updateDl(id, patch) {
+    const list = getDownloads();
+    const idx = list.findIndex(d => d.id === id);
+    if (idx !== -1) {
+        Object.assign(list[idx], patch);
+        saveDownloads(list);
+    }
+    renderDownloadsPage();
+}
+
+function cancelDownload(id) {
+    if (_activeXHR[id]) {
+        _activeXHR[id].abort();
+    } else {
+        _updateDl(id, { status: 'cancelled', error: 'Abgebrochen' });
+    }
+}
+
+function removeDownload(id) {
+    const list = getDownloads().filter(d => d.id !== id);
+    saveDownloads(list);
+    renderDownloadsPage();
+}
+
+function formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function renderDownloadsPage() {
+    const downloadsPage = document.getElementById('downloadsPage');
+    if (!downloadsPage || downloadsPage.style.display === 'none') return;
+
+    const all = getDownloads();
+    const active = all.filter(d => d.status === 'active');
+    const completed = all.filter(d => d.status !== 'active');
+
+    // Update tab counts
+    const activeCount = document.getElementById('dlActiveCount');
+    const completedCount = document.getElementById('dlCompletedCount');
+    if (activeCount) activeCount.textContent = active.length;
+    if (completedCount) completedCount.textContent = completed.length;
+
+    // Render active list
+    const activeList = document.getElementById('dlActiveList');
+    const activeEmpty = document.getElementById('dlActiveEmpty');
+    if (activeList) {
+        if (active.length === 0) {
+            activeList.innerHTML = '';
+            if (activeEmpty) activeEmpty.style.display = 'flex';
+        } else {
+            if (activeEmpty) activeEmpty.style.display = 'none';
+            activeList.innerHTML = active.map(d => _dlCardHtml(d)).join('');
+            // Wire cancel buttons
+            activeList.querySelectorAll('.dl-cancel-btn').forEach(btn => {
+                btn.addEventListener('click', () => cancelDownload(btn.dataset.id));
+            });
+        }
+    }
+
+    // Render completed list
+    const completedList = document.getElementById('dlCompletedList');
+    const completedEmpty = document.getElementById('dlCompletedEmpty');
+    if (completedList) {
+        if (completed.length === 0) {
+            completedList.innerHTML = '';
+            if (completedEmpty) completedEmpty.style.display = 'flex';
+        } else {
+            if (completedEmpty) completedEmpty.style.display = 'none';
+            completedList.innerHTML = completed.map(d => _dlCardHtml(d)).join('');
+            // Wire remove & re-download buttons
+            completedList.querySelectorAll('.dl-remove-btn').forEach(btn => {
+                btn.addEventListener('click', () => removeDownload(btn.dataset.id));
+            });
+            completedList.querySelectorAll('.dl-retry-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const entry = getDownloads().find(d => d.id === btn.dataset.id);
+                    if (entry) startDownload(entry.url, entry.title);
+                });
+            });
+            completedList.querySelectorAll('.dl-open-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const entry = getDownloads().find(d => d.id === btn.dataset.id);
+                    if (entry && entry.objectUrl) {
+                        const a = document.createElement('a');
+                        a.href = entry.objectUrl;
+                        a.download = entry.filename;
+                        a.click();
+                    }
+                });
+            });
+        }
+    }
+
+    // Schedule re-render while there are active downloads (every 800ms)
+    if (active.length > 0) {
+        clearTimeout(renderDownloadsPage._timer);
+        renderDownloadsPage._timer = setTimeout(renderDownloadsPage, 800);
+    }
+}
+
+function _dlCardHtml(d) {
+    const isActive = d.status === 'active';
+    const isError = d.status === 'error' || d.status === 'cancelled';
+    const isCompleted = d.status === 'completed';
+    const pct = d.progress >= 0 ? d.progress : 0;
+    const bytesStr = d.bytesTotal > 0
+        ? `${formatBytes(d.bytesLoaded)} / ${formatBytes(d.bytesTotal)}`
+        : (d.bytesLoaded > 0 ? formatBytes(d.bytesLoaded) : '');
+
+    const speedStr = (isActive && d.speed > 0) ? `${formatBytes(d.speed)}/s` : '';
+    const metaParts = [];
+    if (bytesStr) metaParts.push(bytesStr);
+    if (speedStr) metaParts.push(speedStr);
+    const metaDetails = metaParts.join(' • ');
+
+    const statusIcon = isCompleted
+        ? '<i class="fas fa-check-circle" style="color:#22c55e"></i>'
+        : isError
+            ? '<i class="fas fa-exclamation-circle" style="color:#ef4444"></i>'
+            : '<i class="fas fa-spinner fa-spin" style="color:var(--primary-color)"></i>';
+
+    const statusText = isCompleted ? 'Abgeschlossen'
+        : isError ? (d.error || 'Fehler')
+        : pct >= 0 ? `${pct}%` : 'Lädt…';
+
+    const actionBtns = isActive
+        ? `<button class="dl-cancel-btn btn-sm btn-secondary" data-id="${d.id}" title="Abbrechen"><i class="fas fa-times"></i></button>`
+        : isError
+            ? `<button class="dl-retry-btn btn-sm btn-secondary" data-id="${d.id}" title="Erneut versuchen"><i class="fas fa-redo"></i></button>
+               <button class="dl-remove-btn btn-sm btn-secondary" data-id="${d.id}" title="Entfernen"><i class="fas fa-trash"></i></button>`
+            : `<button class="dl-open-btn btn-sm btn-secondary" data-id="${d.id}" title="Öffnen/Speichern"><i class="fas fa-folder-open"></i></button>
+               <button class="dl-remove-btn btn-sm btn-secondary" data-id="${d.id}" title="Entfernen"><i class="fas fa-trash"></i></button>`;
+
+    return `
+    <div class="dl-card ${isError ? 'dl-error' : isCompleted ? 'dl-done' : ''}">
+        <div class="dl-card-icon">${statusIcon}</div>
+        <div class="dl-card-body">
+            <div class="dl-card-title">${d.title}</div>
+            <div class="dl-card-meta">
+                <span class="dl-status-text">${statusText}</span>
+                ${metaDetails ? `<span class="dl-bytes">${metaDetails}</span>` : ''}
+            </div>
+            ${isActive ? `
+            <div class="dl-progress-track">
+                <div class="dl-progress-bar" style="width:${pct}%"></div>
+            </div>` : ''}
+        </div>
+        <div class="dl-card-actions">${actionBtns}</div>
+    </div>`;
+}
+
+function initDownloadsPage() {
+    // Tab switching
+    document.querySelectorAll('.dl-tab').forEach(tab => {
+        if (tab._dlTabBound) return;
+        tab._dlTabBound = true;
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.dl-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const target = tab.dataset.tab;
+            const activePanel = document.getElementById('dlActivePanel');
+            const completedPanel = document.getElementById('dlCompletedPanel');
+            if (activePanel) activePanel.style.display = target === 'active' ? 'block' : 'none';
+            if (completedPanel) completedPanel.style.display = target === 'completed' ? 'block' : 'none';
+        });
+    });
+
+    // Clear completed
+    const clearBtn = document.getElementById('clearCompletedBtn');
+    if (clearBtn && !clearBtn._dlBound) {
+        clearBtn._dlBound = true;
+        clearBtn.addEventListener('click', () => {
+            const list = getDownloads().filter(d => d.status === 'active');
+            saveDownloads(list);
+            renderDownloadsPage();
+        });
+    }
+
+    // Open downloads folder (Electron only)
+    const openFolderBtn = document.getElementById('openDownloadFolderBtn');
+    if (openFolderBtn && !openFolderBtn._dlBound) {
+        openFolderBtn._dlBound = true;
+        openFolderBtn.addEventListener('click', () => {
+            if (window.electronAPI && window.electronAPI.openDownloadsFolder) {
+                window.electronAPI.openDownloadsFolder();
+            } else {
+                showNotification('Ordner-Öffnen ist nur in der Electron-App verfügbar.', 'info');
+            }
+        });
+    }
+}
+
+function showNotification(message, type = 'info', action = null) {
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.style.cssText = `
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 99999;
+            max-width: 380px;
+            width: calc(100vw - 48px);
+            pointer-events: none;
+        `;
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast-item toast-${type}`;
+    toast.style.cssText = `
+        background: rgba(18, 18, 24, 0.95);
+        color: #f8fafc;
+        border-radius: 12px;
+        padding: 14px 18px;
+        font-family: inherit;
+        font-size: 0.9rem;
+        font-weight: 500;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        transform: translateY(20px);
+        opacity: 0;
+        transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        pointer-events: auto;
+    `;
+
+    // Type styling
+    let icon = 'info-circle';
+    if (type === 'success') {
+        icon = 'check-circle';
+        toast.style.borderLeft = '4px solid #22c55e';
+    } else if (type === 'warning') {
+        icon = 'exclamation-triangle';
+        toast.style.borderLeft = '4px solid #f59e0b';
+    } else if (type === 'error') {
+        icon = 'exclamation-circle';
+        toast.style.borderLeft = '4px solid #ef4444';
+    } else {
+        toast.style.borderLeft = '4px solid var(--primary-color, #a855f7)';
+    }
+
+    let actionBtnHtml = '';
+    if (action) {
+        actionBtnHtml = `<button class="toast-action-btn" style="
+            background: var(--primary-color, #a855f7);
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-left: auto;
+            white-space: nowrap;
+            transition: opacity 0.2s;
+        " onmouseover="this.style.opacity=0.9" onmouseout="this.style.opacity=1">${action.text}</button>`;
+    }
+
+    toast.innerHTML = `
+        <i class="fas fa-${icon}" style="font-size: 1.1rem; flex-shrink: 0; color: ${type === 'success' ? '#22c55e' : type === 'warning' ? '#f59e0b' : type === 'error' ? '#ef4444' : 'var(--primary-color)'}"></i>
+        <div style="flex: 1; line-height: 1.4;">${message}</div>
+        ${actionBtnHtml}
+        <button class="toast-close-btn" style="
+            background: none;
+            border: none;
+            color: #94a3b8;
+            cursor: pointer;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        "><i class="fas fa-times"></i></button>
+    `;
+
+    const closeBtn = toast.querySelector('.toast-close-btn');
+    closeBtn.addEventListener('click', () => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-20px)';
+        setTimeout(() => toast.remove(), 350);
+    });
+
+    if (action) {
+        const actBtn = toast.querySelector('.toast-action-btn');
+        actBtn.addEventListener('click', () => {
+            action.callback();
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-20px)';
+            setTimeout(() => toast.remove(), 350);
+        });
+    }
+
+    container.appendChild(toast);
+
+    // Trigger animate in
+    requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+    });
+
+    // Auto remove
+    const duration = action ? 7000 : 4000;
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-20px)';
+            setTimeout(() => toast.remove(), 350);
+        }
+    }, duration);
+}

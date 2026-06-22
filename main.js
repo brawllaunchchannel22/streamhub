@@ -1,4 +1,6 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol, net } = require('electron');
+process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
+
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -44,6 +46,15 @@ function createWindow() {
         autoHideMenuBar: true,
         icon: path.join(__dirname, 'assets', 'icon.png')
     });
+
+    win.webContents.session.webRequest.onBeforeSendHeaders(
+        { urls: ['*://*.youtube.com/*', '*://*.youtube-nocookie.com/*'] },
+        (details, callback) => {
+            details.requestHeaders['Referer'] = 'https://www.youtube.com';
+            details.requestHeaders['Origin'] = 'https://www.youtube.com';
+            callback({ cancel: false, requestHeaders: details.requestHeaders });
+        }
+    );
 
     win.loadFile('index.html');
 
@@ -198,6 +209,48 @@ ipcMain.handle('scan-videos', async (event, folderPath) => {
     return videos;
 });
 
+// ─── Open URL in system browser ──────────────────────────────────────────────
+ipcMain.handle('open-external', async (event, url) => {
+    await shell.openExternal(url);
+});
+
+// ─── Search YouTube programmatically and return first embed URL ──────────────────
+ipcMain.handle('search-youtube-trailer', async (event, query) => {
+    try {
+        const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAQ%253D%253D`;
+        const response = await net.fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+                'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7'
+            }
+        });
+        const html = await response.text();
+        
+        let videoId = null;
+        const videoIdRegex = /"videoId":"([a-zA-Z0-9_-]{11})"/g;
+        let match = videoIdRegex.exec(html);
+        if (match) {
+            videoId = match[1];
+        } else {
+            const watchRegex = /\/watch\?v=([a-zA-Z0-9_-]{11})/g;
+            match = watchRegex.exec(html);
+            if (match) {
+                videoId = match[1];
+            }
+        }
+        
+        if (videoId) {
+            console.log(`[YouTube Search] Found video ID for query "${query}": ${videoId}`);
+            return `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1`;
+        }
+        console.warn(`[YouTube Search] No video ID found for query "${query}"`);
+        return null;
+    } catch (e) {
+        console.error('[YouTube Search] Error searching YouTube:', e);
+        return null;
+    }
+});
+
 // ─── Disk thumbnail cache ─────────────────────────────────────────────────────
 ipcMain.handle('get-cached-thumbnail', async (event, key) => {
     const file = path.join(CACHE_DIR, crypto.createHash('md5').update(key).digest('hex') + '.jpg');
@@ -218,6 +271,12 @@ ipcMain.handle('set-cached-thumbnail', async (event, key, dataUrl) => {
         console.error('Cache write error:', e.message);
         return false;
     }
+});
+
+// ─── Open downloads folder ────────────────────────────────────────────────────
+ipcMain.handle('open-downloads-folder', async () => {
+    const downloadsDir = app.getPath('downloads');
+    await shell.openPath(downloadsDir);
 });
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
