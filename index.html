@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="de" class="dark" style="color-scheme: dark;">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
@@ -25,6 +25,8 @@
                 <div class="nav-categories">
                     <a href="#" data-category="home" class="active">Start</a>
                     <a href="#" data-category="live" data-page="live">Live TV</a>
+                    <a href="#" data-page="watchlater"><i class="far fa-clock"></i> Später</a>
+                    <a href="#" data-page="playlists"><i class="fas fa-list"></i> Playlists</a>
                     <a href="#" data-category="Dokumentation">Dokus</a>
                     <a href="#" data-category="Tatort">Krimi</a>
                     <a href="#" data-category="Spielfilm">Filme</a>
@@ -57,7 +59,8 @@
         <div class="filter-content">
             <div class="filter-section">
                 <label>Sender</label>
-                <select id="channelFilter">
+                <!-- hidden real select for JS compatibility -->
+                <select id="channelFilter" style="display:none">
                     <option value="">Alle Sender</option>
                     <option value="ARD">ARD</option>
                     <option value="ZDF">ZDF</option>
@@ -72,10 +75,28 @@
                     <option value="SWR">SWR</option>
                     <option value="WDR">WDR</option>
                 </select>
+                <div class="cust-select" data-target="channelFilter">
+                    <div class="cust-select-trigger"><span>Alle Sender</span><i class="fas fa-chevron-down"></i></div>
+                    <div class="cust-select-options">
+                        <div class="cust-opt" data-value="">Alle Sender</div>
+                        <div class="cust-opt" data-value="ARD">ARD</div>
+                        <div class="cust-opt" data-value="ZDF">ZDF</div>
+                        <div class="cust-opt" data-value="3sat">3sat</div>
+                        <div class="cust-opt" data-value="ARTE">ARTE</div>
+                        <div class="cust-opt" data-value="BR">BR</div>
+                        <div class="cust-opt" data-value="HR">HR</div>
+                        <div class="cust-opt" data-value="MDR">MDR</div>
+                        <div class="cust-opt" data-value="NDR">NDR</div>
+                        <div class="cust-opt" data-value="RBB">RBB</div>
+                        <div class="cust-opt" data-value="SR">SR</div>
+                        <div class="cust-opt" data-value="SWR">SWR</div>
+                        <div class="cust-opt" data-value="WDR">WDR</div>
+                    </div>
+                </div>
             </div>
             <div class="filter-section">
                 <label>Genre</label>
-                <select id="genreFilter">
+                <select id="genreFilter" style="display:none">
                     <option value="">Alle Genres</option>
                     <option value="Dokumentation">Dokumentation</option>
                     <option value="Film">Spielfilm</option>
@@ -90,10 +111,28 @@
                     <option value="Musik">Musik</option>
                     <option value="Comedy">Comedy</option>
                 </select>
+                <div class="cust-select" data-target="genreFilter">
+                    <div class="cust-select-trigger"><span>Alle Genres</span><i class="fas fa-chevron-down"></i></div>
+                    <div class="cust-select-options">
+                        <div class="cust-opt" data-value="">Alle Genres</div>
+                        <div class="cust-opt" data-value="Dokumentation">Dokumentation</div>
+                        <div class="cust-opt" data-value="Film">Spielfilm</div>
+                        <div class="cust-opt" data-value="Serie">Serie</div>
+                        <div class="cust-opt" data-value="Krimi">Krimi</div>
+                        <div class="cust-opt" data-value="Tatort">Tatort</div>
+                        <div class="cust-opt" data-value="Nachrichten">Nachrichten</div>
+                        <div class="cust-opt" data-value="Sport">Sport</div>
+                        <div class="cust-opt" data-value="Unterhaltung">Unterhaltung</div>
+                        <div class="cust-opt" data-value="Kinder">Kinder</div>
+                        <div class="cust-opt" data-value="Kultur">Kultur</div>
+                        <div class="cust-opt" data-value="Musik">Musik</div>
+                        <div class="cust-opt" data-value="Comedy">Comedy</div>
+                    </div>
+                </div>
             </div>
             <div class="filter-section">
                 <label>Dauer</label>
-                <select id="durationFilter">
+                <select id="durationFilter" style="display:none">
                     <option value="0">Alle Längen</option>
                     <option value="5">Über 5 Min</option>
                     <option value="15">Über 15 Min</option>
@@ -101,15 +140,35 @@
                     <option value="60">Über 1 Stunde</option>
                     <option value="90">Über 1,5 Stunden</option>
                 </select>
+                <div class="cust-select" data-target="durationFilter">
+                    <div class="cust-select-trigger"><span>Alle Längen</span><i class="fas fa-chevron-down"></i></div>
+                    <div class="cust-select-options">
+                        <div class="cust-opt" data-value="0">Alle Längen</div>
+                        <div class="cust-opt" data-value="5">Über 5 Min</div>
+                        <div class="cust-opt" data-value="15">Über 15 Min</div>
+                        <div class="cust-opt" data-value="30">Über 30 Min</div>
+                        <div class="cust-opt" data-value="60">Über 1 Stunde</div>
+                        <div class="cust-opt" data-value="90">Über 1,5 Stunden</div>
+                    </div>
+                </div>
             </div>
             <div class="filter-section">
                 <label>Sortierung</label>
-                <select id="sortFilter">
+                <select id="sortFilter" style="display:none">
                     <option value="date">Neueste zuerst</option>
                     <option value="duration">Nach Länge</option>
                     <option value="title">Alphabetisch</option>
                     <option value="episode">Nach Episoden</option>
                 </select>
+                <div class="cust-select" data-target="sortFilter">
+                    <div class="cust-select-trigger"><span>Neueste zuerst</span><i class="fas fa-chevron-down"></i></div>
+                    <div class="cust-select-options">
+                        <div class="cust-opt" data-value="date">Neueste zuerst</div>
+                        <div class="cust-opt" data-value="duration">Nach Länge</div>
+                        <div class="cust-opt" data-value="title">Alphabetisch</div>
+                        <div class="cust-opt" data-value="episode">Nach Episoden</div>
+                    </div>
+                </div>
             </div>
             <div class="filter-section">
                 <label class="checkbox-label">
@@ -119,9 +178,6 @@
             </div>
             <button id="applyFilter" class="btn-primary">Filter anwenden</button>
             <button id="resetFilter" class="btn-secondary">Zurücksetzen</button>
-            <button id="quickSubscribeBtn" class="btn-secondary" style="margin-top:0.5rem;" title="Aktuelle Suche abonnieren">
-                <i class="fas fa-bell"></i> Suche abonnieren
-            </button>
         </div>
     </div>
 
@@ -144,6 +200,14 @@
                 <i class="fas fa-heart"></i>
                 <span>Merkliste</span>
             </a>
+            <a href="#" class="hamburger-item" data-page="watchlater">
+                <i class="far fa-clock"></i>
+                <span>Später ansehen</span>
+            </a>
+            <a href="#" class="hamburger-item" data-page="playlists">
+                <i class="fas fa-list"></i>
+                <span>Meine Playlists</span>
+            </a>
             <a href="#" class="hamburger-item" data-page="live">
                 <i class="fas fa-broadcast-tower"></i>
                 <span>Live TV</span>
@@ -155,10 +219,6 @@
             <a href="#" class="hamburger-item" data-page="stats">
                 <i class="fas fa-chart-bar"></i>
                 <span>Statistiken</span>
-            </a>
-            <a href="#" class="hamburger-item" data-page="abos">
-                <i class="fas fa-bell"></i>
-                <span>Abonnements</span>
             </a>
             <a href="#" class="hamburger-item" data-page="downloads">
                 <i class="fas fa-download"></i>
@@ -385,6 +445,60 @@
             </div>
         </section>
 
+        <!-- Watch Later Page -->
+        <section id="watchLaterPage" class="content-section" style="display: none;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <button id="backFromWatchLater" class="btn-back"><i class="fas fa-arrow-left"></i> Zurück</button>
+                    <h2><i class="far fa-clock" style="color: #f59e0b;"></i> Später ansehen</h2>
+                </div>
+                <button id="clearWatchLaterBtn" class="btn-secondary" style="padding: 8px 16px; border-radius: 100px;">
+                    <i class="fas fa-trash"></i> Liste leeren
+                </button>
+            </div>
+            <div id="watchLaterGrid" class="video-grid" style="margin-top: 1.5rem;"></div>
+            <div id="watchLaterEmpty" class="empty-state" style="display: none;">
+                <i class="far fa-clock" style="color: #f59e0b;"></i>
+                <h3>Keine Videos für später gespeichert</h3>
+                <p>Klicke auf das Uhr-Icon <i class="far fa-clock"></i> bei einem Video oder halte es gedrückt, um es für später zu speichern.</p>
+            </div>
+        </section>
+
+        <!-- Playlists Page -->
+        <section id="playlistsPage" class="content-section" style="display: none;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <button id="backFromPlaylists" class="btn-back"><i class="fas fa-arrow-left"></i> Zurück</button>
+                    <h2><i class="fas fa-list" style="color: var(--primary-color);"></i> Meine Playlists</h2>
+                </div>
+                <button id="createPlaylistNavBtn" class="btn-primary-inline" style="padding: 10px 20px; border-radius: 100px;">
+                    <i class="fas fa-plus"></i> Neue Playlist
+                </button>
+            </div>
+            <div id="playlistsGrid" class="video-grid" style="margin-top: 1.5rem;"></div>
+            <div id="playlistsEmpty" class="empty-state" style="display: none;">
+                <i class="fas fa-list"></i>
+                <h3>Keine Playlists</h3>
+                <p>Du hast noch keine eigenen Playlists erstellt. Klicke auf „Neue Playlist“ oder halte ein Video gedrückt.</p>
+            </div>
+        </section>
+
+        <!-- Playlist Detail Page -->
+        <section id="playlistDetailPage" class="content-section" style="display: none;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <button id="backFromPlaylistDetail" class="btn-back"><i class="fas fa-arrow-left"></i> Zurück</button>
+                    <h2 id="playlistDetailTitle"><i class="fas fa-list" style="color: var(--primary-color);"></i> Playlist</h2>
+                </div>
+            </div>
+            <div id="playlistDetailGrid" class="video-grid" style="margin-top: 1.5rem;"></div>
+            <div id="playlistDetailEmpty" class="empty-state" style="display: none;">
+                <i class="fas fa-film"></i>
+                <h3>Keine Videos in dieser Playlist</h3>
+                <p>Halte ein Video auf der Startseite gedrückt, um es zu dieser Playlist hinzuzufügen.</p>
+            </div>
+        </section>
+
         <!-- Settings Page -->
         <section id="settingsPage" class="content-section" style="display: none;">
             <div class="section-header">
@@ -408,24 +522,48 @@
                     </div>
                     <div class="setting-item">
                         <label>Farbtheme</label>
-                        <select id="settingTheme" class="setting-select">
+                        <select id="settingTheme" style="display:none">
                             <option value="dark">Standard Dunkel</option>
                             <option value="amoled">Amoled Schwarz</option>
-                            <option value="light">Hell</option>
+                            <option value="cyberpunk">Neon Cyberpunk</option>
+                            <option value="emerald">Smaragdgrün (Emerald)</option>
+                            <option value="sunset">Sonnenuntergang (Sunset)</option>
                             <option value="ocean">Ozeanblau</option>
                             <option value="purple">Mitternachtslila</option>
+                            <option value="light">Hell</option>
                             <option value="system">System / Dynamisch (Android)</option>
                         </select>
+                        <div class="cust-select" data-target="settingTheme">
+                            <div class="cust-select-trigger"><span>Standard Dunkel</span><i class="fas fa-chevron-down"></i></div>
+                            <div class="cust-select-options">
+                                <div class="cust-opt" data-value="dark">Standard Dunkel</div>
+                                <div class="cust-opt" data-value="amoled">Amoled Schwarz</div>
+                                <div class="cust-opt" data-value="cyberpunk">Neon Cyberpunk</div>
+                                <div class="cust-opt" data-value="emerald">Smaragdgrün (Emerald)</div>
+                                <div class="cust-opt" data-value="sunset">Sonnenuntergang (Sunset)</div>
+                                <div class="cust-opt" data-value="ocean">Ozeanblau</div>
+                                <div class="cust-opt" data-value="purple">Mitternachtslila</div>
+                                <div class="cust-opt" data-value="light">Hell</div>
+                                <div class="cust-opt" data-value="system">System / Dynamisch (Android)</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="settings-section">
                     <h3>Lokale Videos</h3>
                     <div class="setting-item">
                         <label>Standard-Videoplayer</label>
-                        <select id="settingDefaultPlayer" class="setting-select">
+                        <select id="settingDefaultPlayer" style="display:none">
                             <option value="internal">Integrierter Player</option>
                             <option value="external">Externer Player (VLC, etc.)</option>
                         </select>
+                        <div class="cust-select" data-target="settingDefaultPlayer">
+                            <div class="cust-select-trigger"><span>Integrierter Player</span><i class="fas fa-chevron-down"></i></div>
+                            <div class="cust-select-options">
+                                <div class="cust-opt" data-value="internal">Integrierter Player</div>
+                                <div class="cust-opt" data-value="external">Externer Player (VLC, etc.)</div>
+                            </div>
+                        </div>
                     </div>
                     <div class="setting-item">
                         <button id="manageLocalFolders" class="btn-secondary">
@@ -518,6 +656,24 @@
         </div>
     </footer>
 
+    <!-- New Playlist Modal (Android compatible alternative to window.prompt) -->
+    <div id="newPlaylistModal" class="modal" style="display:none; z-index:99999;">
+        <div class="modal-backdrop" id="closeNewPlaylistBackdrop"></div>
+        <div class="modal-content" style="max-width:420px; padding:24px; border-radius:24px; text-align:left; background:var(--surface-card,#1e1e2e); border:1px solid var(--border-color,rgba(255,255,255,0.15));">
+            <h3 style="margin-bottom:16px; font-weight:700; display:flex; align-items:center; gap:8px;">
+                <i class="fas fa-plus-circle" style="color:var(--primary-color,#6366f1);"></i> Neue Playlist erstellen
+            </h3>
+            <div style="margin-bottom:20px;">
+                <label style="display:block; font-size:0.85rem; color:var(--text-secondary,#94a3b8); margin-bottom:8px;">Name der Playlist</label>
+                <input type="text" id="newPlaylistNameInput" class="setting-input" placeholder="z.B. Lieblingskrimis, Dokus..." style="width:100%; padding:12px; border-radius:12px; border:1px solid var(--border-color); background:rgba(255,255,255,0.05); color:#fff; font-size:1rem;" autocomplete="off">
+            </div>
+            <div style="display:flex; gap:12px; justify-content:flex-end;">
+                <button id="cancelNewPlaylistBtn" class="btn-secondary" style="padding:10px 18px; border-radius:100px;">Abbrechen</button>
+                <button id="confirmNewPlaylistBtn" class="btn-primary-inline" style="padding:10px 20px; border-radius:100px;"><i class="fas fa-check"></i> Erstellen</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Info Modal -->
     <div id="infoModal" class="info-modal">
         <div class="info-modal-content">
@@ -560,6 +716,30 @@
                 
                 <div class="video-actions">
                     <div class="quality-selector-container">
+                        <label for="speedSelector">
+                            <i class="fas fa-tachometer-alt"></i> Tempo:
+                        </label>
+                        <select id="speedSelector" style="display:none">
+                            <option value="0.75">0.75x</option>
+                            <option value="1.0" selected>1.0x (Normal)</option>
+                            <option value="1.25">1.25x</option>
+                            <option value="1.5">1.5x</option>
+                            <option value="2.0">2.0x</option>
+                            <option value="3.0">3.0x</option>
+                        </select>
+                        <div class="cust-select" data-target="speedSelector" style="min-width: 120px;">
+                            <div class="cust-select-trigger"><span>1.0x (Normal)</span><i class="fas fa-chevron-down"></i></div>
+                            <div class="cust-select-options">
+                                <div class="cust-opt" data-value="0.75">0.75x</div>
+                                <div class="cust-opt" data-value="1.0">1.0x (Normal)</div>
+                                <div class="cust-opt" data-value="1.25">1.25x</div>
+                                <div class="cust-opt" data-value="1.5">1.5x</div>
+                                <div class="cust-opt" data-value="2.0">2.0x</div>
+                                <div class="cust-opt" data-value="3.0">3.0x</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="quality-selector-container">
                         <label for="qualitySelector">
                             <i class="fas fa-cog"></i> Qualität:
                         </label>
@@ -571,6 +751,15 @@
                         </label>
                         <select id="subtitleSelector" class="quality-selector"></select>
                     </div>
+                    <button id="modalWatchlistBtn" class="action-btn" title="Zur Merkliste" tabindex="-1">
+                        <i class="fas fa-heart"></i> Merkliste
+                    </button>
+                    <button id="modalWatchLaterBtn" class="action-btn" title="Später ansehen" tabindex="-1">
+                        <i class="far fa-clock"></i> Später
+                    </button>
+                    <button id="subscribeBtn" class="action-btn" title="Serie/Sendung abonnieren" tabindex="-1">
+                        <i class="fas fa-bell"></i> Abonnieren
+                    </button>
                     <button id="trailerBtn" class="action-btn" title="Trailer abspielen" tabindex="-1" style="display: none;">
                         <i class="fas fa-film"></i> Trailer
                     </button>

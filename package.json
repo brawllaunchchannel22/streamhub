@@ -1,6 +1,6 @@
 {
   "name": "streamhub",
-  "version": "3.0.0",
+  "version": "3.0.3",
   "description": "Moderne Mediathek-App für deutsche Sender",
   "main": "main.js",
   "author": {
@@ -16,6 +16,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "sync:android": "python3 sync.py",
     "build:deb": "electron-builder --linux deb",
     "build:appimage": "electron-builder --linux AppImage",
     "build": "electron-builder --linux"

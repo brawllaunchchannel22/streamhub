@@ -1,6 +1,13 @@
 package de.streamhub.app;
 
+import android.app.PendingIntent;
 import android.app.PictureInPictureParams;
+import android.app.RemoteAction;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
@@ -9,15 +16,25 @@ import android.util.Rational;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.os.Bundle;
-import android.content.Context;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.BridgeActivity;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends BridgeActivity {
+
+    // PiP control action constants
+    private static final String ACTION_PIP_PLAY_PAUSE = "de.streamhub.app.PIP_PLAY_PAUSE";
+    private static final String ACTION_PIP_REWIND     = "de.streamhub.app.PIP_REWIND";
+    private static final String ACTION_PIP_FORWARD    = "de.streamhub.app.PIP_FORWARD";
+    private static final int    PIP_REQUEST_CODE      = 42;
+
+    private BroadcastReceiver pipActionReceiver;
+    private boolean _isInPip = false;
 
     private OnBackPressedCallback webViewBackCallback;
 
@@ -124,6 +141,47 @@ public class MainActivity extends BridgeActivity {
                         } catch (Exception e) { /* ignore */ }
                     }
 
+                    // Update PiP auto-enter status for Android 12+ (API 31+)
+                    @android.webkit.JavascriptInterface
+                    public void updatePipAutoEnter(boolean enabled) {
+                        runOnUiThread(() -> {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                try {
+                                    PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
+                                    builder.setAspectRatio(new Rational(16, 9));
+                                    builder.setAutoEnterEnabled(enabled);
+                                    List<RemoteAction> actions = buildPipActions();
+                                    if (!actions.isEmpty()) builder.setActions(actions);
+                                    setPictureInPictureParams(builder.build());
+                                } catch (Exception e) { e.printStackTrace(); }
+                            }
+                        });
+                    }
+
+                    // Native Android Picture-in-Picture mode trigger
+                    @android.webkit.JavascriptInterface
+                    public void enterPip() {
+                        runOnUiThread(() -> {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                try {
+                                    WebView webView = getBridge().getWebView();
+                                    if (webView != null) {
+                                        webView.evaluateJavascript(
+                                            "document.body.classList.add('in-pip-mode');" +
+                                            "var vm=document.getElementById('videoModal');if(vm)vm.classList.add('active');" +
+                                            "void 0;",
+                                            res -> webView.post(() -> {
+                                                try {
+                                                    enterPipWithControls();
+                                                } catch (Exception e) { e.printStackTrace(); }
+                                            })
+                                        );
+                                    }
+                                } catch (Exception e) { e.printStackTrace(); }
+                            }
+                        });
+                    }
+
                     // Material You dynamic colors
                     @android.webkit.JavascriptInterface
                     public String getSystemColors() {
@@ -156,6 +214,20 @@ public class MainActivity extends BridgeActivity {
 
     private static String hex(int color) {
         return String.format("#%06X", 0xFFFFFF & color);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        hideSystemUI();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!isInPictureInPictureMode()) {
+                WebView webView = getBridge().getWebView();
+                if (webView != null) {
+                    webView.evaluateJavascript("document.body.classList.remove('in-pip-mode'); void 0;", null);
+                }
+            }
+        }
     }
 
     @Override
@@ -192,13 +264,141 @@ public class MainActivity extends BridgeActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WebView webView = getBridge().getWebView();
             if (webView != null) {
-                String title = webView.getTitle();
-                if (title != null && title.contains("[PLAYING]")) {
-                    PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
-                    builder.setAspectRatio(new Rational(16, 9));
-                    enterPictureInPictureMode(builder.build());
-                }
+                webView.evaluateJavascript(
+                    "(function(){ var m=document.getElementById('videoModal'); return m && m.classList.contains('active'); })()",
+                    res -> {
+                        if ("true".equals(res)) {
+                            // Step 1: add CSS class so WebView hides all UI except video
+                            webView.evaluateJavascript(
+                                "document.body.classList.add('in-pip-mode'); void 0;",
+                                r -> {
+                                    // Step 2: wait 200ms for browser reflow+repaint THEN enter PiP
+                                    // so Android captures the fullscreen video, not the modal layout
+                                    webView.postDelayed(() -> {
+                                        try {
+                                            enterPipWithControls();
+                                        } catch (Exception e) {
+                                            webView.evaluateJavascript("document.body.classList.remove('in-pip-mode'); void 0;", null);
+                                        }
+                                    }, 200);
+                                }
+                            );
+                        }
+                    }
+                );
             }
         }
+    }
+
+    // ── PiP helpers ──────────────────────────────────────────────────────────
+    private void enterPipWithControls() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        try {
+            PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
+            builder.setAspectRatio(new Rational(16, 9));
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                List<RemoteAction> actions = buildPipActions();
+                if (!actions.isEmpty()) builder.setActions(actions);
+            }
+            registerPipReceiver();
+            enterPictureInPictureMode(builder.build());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private List<RemoteAction> buildPipActions() {
+        List<RemoteAction> actions = new ArrayList<>();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return actions;
+        try {
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+
+            // Rewind 10s
+            Intent rewindIntent = new Intent(ACTION_PIP_REWIND).setPackage(getPackageName());
+            PendingIntent rewindPI = PendingIntent.getBroadcast(this, PIP_REQUEST_CODE + 1, rewindIntent, flags);
+            RemoteAction rewindAction = new RemoteAction(
+                Icon.createWithResource(this, android.R.drawable.ic_media_previous),
+                "-10s", "Zurückspulen", rewindPI);
+            actions.add(rewindAction);
+
+            // Play/Pause
+            Intent ppIntent = new Intent(ACTION_PIP_PLAY_PAUSE).setPackage(getPackageName());
+            PendingIntent ppPI = PendingIntent.getBroadcast(this, PIP_REQUEST_CODE, ppIntent, flags);
+            RemoteAction ppAction = new RemoteAction(
+                Icon.createWithResource(this, android.R.drawable.ic_media_pause),
+                "Pause/Play", "Pause / Abspielen", ppPI);
+            actions.add(ppAction);
+
+            // Forward 10s
+            Intent fwdIntent = new Intent(ACTION_PIP_FORWARD).setPackage(getPackageName());
+            PendingIntent fwdPI = PendingIntent.getBroadcast(this, PIP_REQUEST_CODE + 2, fwdIntent, flags);
+            RemoteAction fwdAction = new RemoteAction(
+                Icon.createWithResource(this, android.R.drawable.ic_media_next),
+                "+10s", "Vorspulen", fwdPI);
+            actions.add(fwdAction);
+        } catch (Exception e) { e.printStackTrace(); }
+        return actions;
+    }
+
+    private void registerPipReceiver() {
+        if (pipActionReceiver != null) return;
+        pipActionReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context ctx, Intent intent) {
+                if (intent == null) return;
+                WebView wv = getBridge().getWebView();
+                if (wv == null) return;
+                String action = intent.getAction();
+                if (ACTION_PIP_PLAY_PAUSE.equals(action)) {
+                    wv.evaluateJavascript(
+                        "(function(){ var v=document.getElementById('videoPlayer'); if(!v) return;" +
+                        "if(v.paused) v.play(); else v.pause(); })()", null);
+                } else if (ACTION_PIP_REWIND.equals(action)) {
+                    wv.evaluateJavascript(
+                        "(function(){ var v=document.getElementById('videoPlayer'); if(v) v.currentTime=Math.max(0,v.currentTime-10); })()", null);
+                } else if (ACTION_PIP_FORWARD.equals(action)) {
+                    wv.evaluateJavascript(
+                        "(function(){ var v=document.getElementById('videoPlayer'); if(v) v.currentTime=Math.min(v.duration,v.currentTime+10); })()", null);
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(ACTION_PIP_PLAY_PAUSE);
+        filter.addAction(ACTION_PIP_REWIND);
+        filter.addAction(ACTION_PIP_FORWARD);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(pipActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(pipActionReceiver, filter);
+        }
+    }
+
+    private void unregisterPipReceiver() {
+        if (pipActionReceiver != null) {
+            try { unregisterReceiver(pipActionReceiver); } catch (Exception ignored) {}
+            pipActionReceiver = null;
+        }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, android.content.res.Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        _isInPip = isInPictureInPictureMode;
+        WebView webView = getBridge().getWebView();
+        if (!isInPictureInPictureMode) {
+            // EXIT: restore UI
+            unregisterPipReceiver();
+            if (webView != null) {
+                webView.evaluateJavascript(
+                    "document.body.classList.remove('in-pip-mode'); void 0;", null);
+            }
+        }
+    }
+
+    @Override
+    public void onDestroy() {
+        unregisterPipReceiver();
+        super.onDestroy();
     }
 }

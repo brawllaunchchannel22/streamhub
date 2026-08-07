@@ -35,6 +35,7 @@ function createWindow() {
         minWidth: 1200,
         minHeight: 800,
         backgroundColor: '#0f0f0f',
+        fullscreen: false,      // start maximized, not true-fullscreen (no title bar)
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -46,6 +47,8 @@ function createWindow() {
         autoHideMenuBar: true,
         icon: path.join(__dirname, 'assets', 'icon.png')
     });
+
+    win.maximize();
 
     win.webContents.session.webRequest.onBeforeSendHeaders(
         { urls: ['*://*.youtube.com/*', '*://*.youtube-nocookie.com/*'] },
