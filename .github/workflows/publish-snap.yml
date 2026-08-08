@@ -30,31 +30,40 @@ jobs:
         uses: snapcore/action-build@v1
         id: build
 
-      - name: Upload Snap via Canonical API
+      - name: Install craft-store
+        run: pip3 install craft-store keyrings.alt
+
+      - name: Upload Snap via craft-store
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
           SNAP_FILE: ${{ steps.build.outputs.snap }}
         run: |
-          python3 -c "
-          import os, json, base64, requests
+          PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring python3 -c "
+          import os, json, base64, keyring, pathlib
+          from craft_store import StoreClient, endpoints
 
           raw_creds = os.environ['SNAPCRAFT_STORE_CREDENTIALS']
+          
+          # Erstelle valides Credentials-Format für craft-store
           try:
-              macaroon = json.loads(base64.b64decode(raw_creds))['v']
+              json.loads(base64.b64decode(raw_creds))
+              valid_creds = raw_creds
           except Exception:
-              macaroon = raw_creds
+              valid_creds = base64.b64encode(json.dumps({'t': 'macaroon', 'v': raw_creds}).encode('utf-8')).decode('utf-8')
 
-          headers = {'Authorization': f'Macaroon {macaroon}'}
+          keyring.set_password('snapcraft', 'dashboard.snapcraft.io', valid_creds)
 
-          snap_file = os.environ['SNAP_FILE']
-          print(f'Uploading {snap_file} to Canonical Snap Store...')
+          client = StoreClient(
+              base_url='https://dashboard.snapcraft.io',
+              storage_base_url='https://storage.snapcraftcontent.com',
+              endpoints=endpoints.U1_SNAP_STORE,
+              user_agent='snapcraft/8.0',
+              application_name='snapcraft',
+          )
 
-          with open(snap_file, 'rb') as f:
-              files = {'binary': (os.path.basename(snap_file), f, 'application/octet-stream')}
-              r = requests.post('https://upload.apps.ubuntu.com/v2/snaps/streamhub/push', headers=headers, files=files)
+          snap_path = pathlib.Path(os.environ['SNAP_FILE'])
+          print(f'Uploading {snap_path}...')
 
-          print('HTTP Status:', r.status_code)
-          print('Response:', r.text)
-          if r.status_code not in [200, 201, 202]:
-              raise Exception('Upload fehlgeschlagen!')
+          upload_id = client.upload_file(filepath=snap_path)
+          print(f'Upload erfolgreich! Upload ID: {upload_id}')
           "
