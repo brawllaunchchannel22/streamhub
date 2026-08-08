@@ -51,7 +51,7 @@ jobs:
 
           with open(snap_file, 'rb') as f:
               files = {'binary': (os.path.basename(snap_file), f, 'application/octet-stream')}
-              r = requests.post('https://upload.snapcraft.io/v2/snaps/streamhub/push', headers=headers, files=files)
+              r = requests.post('https://upload.apps.ubuntu.com/v2/snaps/streamhub/push', headers=headers, files=files)
 
           print('HTTP Status:', r.status_code)
           print('Response:', r.text)
