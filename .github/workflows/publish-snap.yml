@@ -22,7 +22,9 @@ jobs:
         run: npm ci
 
       - name: Build Electron app
-        run: npm run build
+        run: npm run build -- --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Snap
         uses: snapcore/action-build@v1
