@@ -30,51 +30,22 @@ jobs:
         uses: snapcore/action-build@v1
         id: build
 
-      - name: Install craft-store
-        run: pip3 install craft-store keyrings.alt
-
-      - name: Upload and Release Snap via craft-store
+      - name: Publish Snap via Snapcraft CLI
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
           SNAP_FILE: ${{ steps.build.outputs.snap }}
         run: |
-          PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring python3 -c "
-          import os, json, base64, keyring, pathlib
-          from craft_store import StoreClient, endpoints
-          from craft_store.models.release_request_model import ReleaseRequestModel
+          mkdir -p ~/.config/snapcraft
+          python3 -c "
+          import os, json, base64
 
-          raw_creds = os.environ['SNAPCRAFT_STORE_CREDENTIALS']
-          
+          raw = os.environ['SNAPCRAFT_STORE_CREDENTIALS']
           try:
-              json.loads(base64.b64decode(raw_creds))
-              valid_creds = raw_creds
+              macaroon = json.loads(base64.b64decode(raw))['v']
           except Exception:
-              valid_creds = base64.b64encode(json.dumps({'t': 'macaroon', 'v': raw_creds}).encode('utf-8')).decode('utf-8')
+              macaroon = raw
 
-          keyring.set_password('snapcraft', 'dashboard.snapcraft.io', valid_creds)
-
-          client = StoreClient(
-              base_url='https://dashboard.snapcraft.io',
-              storage_base_url='https://storage.snapcraftcontent.com',
-              endpoints=endpoints.U1_SNAP_STORE,
-              user_agent='snapcraft/8.0',
-              application_name='snapcraft',
-          )
-
-          snap_path = pathlib.Path(os.environ['SNAP_FILE'])
-          print(f'1. Uploading {snap_path}...')
-
-          upload_id = client.upload_file(filepath=snap_path)
-          print(f'Upload erfolgreich! Upload ID: {upload_id}')
-
-          print('2. Pushing binary to streamhub resource...')
-          res_revision = client.push_resource(name='streamhub', resource_name='snap', upload_id=upload_id)
-          print(f'Revision {res_revision} erstellt!')
-
-          print('3. Releasing to stable channel...')
-          client.release(
-              name='streamhub',
-              release_request=[ReleaseRequestModel(channel='stable', revision=int(res_revision))]
-          )
-          print('HERZLICHEN GLÜCKWUNSCH! Release im Store abgeschlossen!')
+          with open(os.path.expanduser('~/.config/snapcraft/credentials.txt'), 'w') as f:
+              f.write(macaroon)
           "
+          snapcraft upload --release=stable "$SNAP_FILE"
