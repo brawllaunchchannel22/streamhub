@@ -30,8 +30,32 @@ jobs:
         uses: snapcore/action-build@v1
         id: build
 
-      - name: Upload Snap to Store
+      - name: Install upload dependencies
+        run: pip3 install craft-store keyrings.alt
+
+      - name: Upload Snap via Store API
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          SNAP_FILE: ${{ steps.build.outputs.snap }}
         run: |
-          snapcraft upload --release=stable ${{ steps.build.outputs.snap }}
+          PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring python3 -c "
+          import keyring, os, sys
+          from craft_store import StoreClient, endpoints
+
+          creds = os.environ['SNAPCRAFT_STORE_CREDENTIALS']
+          keyring.set_password('snapcraft', 'dashboard.snapcraft.io', creds)
+
+          snap_file = os.environ['SNAP_FILE']
+          print(f'Uploading {snap_file} to Snap Store...')
+
+          client = StoreClient(
+              base_url='https://dashboard.snapcraft.io',
+              storage_base_url='https://storage.snapcraftcontent.com',
+              endpoints=endpoints.SNAP_STORE,
+              user_agent='snapcraft/8.0',
+              application_name='snapcraft',
+          )
+          
+          res = client.upload_file(snap_name='streamhub', filepath=snap_file, channels=['stable'])
+          print('Upload erfolgreich!', res)
+          "
