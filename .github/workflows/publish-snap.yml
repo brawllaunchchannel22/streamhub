@@ -30,22 +30,10 @@ jobs:
         uses: snapcore/action-build@v1
         id: build
 
-      - name: Publish Snap via Snapcraft CLI
+      - name: Publish Snap
+        uses: snapcore/action-publish@v1
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-          SNAP_FILE: ${{ steps.build.outputs.snap }}
-        run: |
-          mkdir -p ~/.config/snapcraft
-          python3 -c "
-          import os, json, base64
-
-          raw = os.environ['SNAPCRAFT_STORE_CREDENTIALS']
-          try:
-              macaroon = json.loads(base64.b64decode(raw))['v']
-          except Exception:
-              macaroon = raw
-
-          with open(os.path.expanduser('~/.config/snapcraft/credentials.txt'), 'w') as f:
-              f.write(macaroon)
-          "
-          snapcraft upload --release=stable "$SNAP_FILE"
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: stable
