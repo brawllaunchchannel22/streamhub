@@ -44,6 +44,14 @@ Stelle sicher, dass **Node.js** (v18+) und **npm** auf deinem Linux-System insta
 
 ---
 
+
+PPA:
+sudo add-apt-repository ppa:brawllaunchchannel/streamhub
+sudo apt update
+sudo apt install streamhub
+
+---
+
 ## 📦 Als Debian-Paket (.deb) paketieren
 
 StreamHub nutzt `electron-builder`, um fertige Installationspakete zu generieren.
