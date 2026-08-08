@@ -30,10 +30,31 @@ jobs:
         uses: snapcore/action-build@v1
         id: build
 
-      - name: Publish Snap to Store
-        uses: snapcore/action-publish@v1
+      - name: Upload Snap via Canonical API
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-        with:
-          snap: ${{ steps.build.outputs.snap }}
-          release: stable
+          SNAP_FILE: ${{ steps.build.outputs.snap }}
+        run: |
+          python3 -c "
+          import os, json, base64, requests
+
+          raw_creds = os.environ['SNAPCRAFT_STORE_CREDENTIALS']
+          try:
+              macaroon = json.loads(base64.b64decode(raw_creds))['v']
+          except Exception:
+              macaroon = raw_creds
+
+          headers = {'Authorization': f'Macaroon {macaroon}'}
+
+          snap_file = os.environ['SNAP_FILE']
+          print(f'Uploading {snap_file} to Canonical Snap Store...')
+
+          with open(snap_file, 'rb') as f:
+              files = {'binary': (os.path.basename(snap_file), f, 'application/octet-stream')}
+              r = requests.post('https://upload.snapcraft.io/v2/snaps/streamhub/push', headers=headers, files=files)
+
+          print('HTTP Status:', r.status_code)
+          print('Response:', r.text)
+          if r.status_code not in [200, 201, 202]:
+              raise Exception('Upload fehlgeschlagen!')
+          "
