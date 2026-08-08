@@ -30,43 +30,10 @@ jobs:
         uses: snapcore/action-build@v1
         id: build
 
-      - name: Install craft-store
-        run: pip3 install craft-store keyrings.alt
-
-      - name: Upload and Release Snap via Store API
+      - name: Publish Snap to Store
+        uses: snapcore/action-publish@v1
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-          SNAP_FILE: ${{ steps.build.outputs.snap }}
-        run: |
-          PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring python3 -c "
-          import keyring, os, pathlib
-          from craft_store import StoreClient, endpoints
-          from craft_store.models.revisions_model import RevisionsRequestModel
-          from craft_store.models.release_request_model import ReleaseRequestModel
-
-          creds = os.environ['SNAPCRAFT_STORE_CREDENTIALS']
-          keyring.set_password('snapcraft', 'dashboard.snapcraft.io', creds)
-
-          snap_path = pathlib.Path(os.environ['SNAP_FILE'])
-          print(f'1. Uploading {snap_path} to Snap Store...')
-
-          client = StoreClient(
-              base_url='https://dashboard.snapcraft.io',
-              storage_base_url='https://storage.snapcraftcontent.com',
-              endpoints=endpoints.U1_SNAP_STORE,
-              user_agent='snapcraft/8.0',
-              application_name='snapcraft',
-          )
-
-          upload_id = client.upload_file(filepath=snap_path)
-          print(f'Upload ID erhalten: {upload_id}')
-
-          print('2. Registriere Revision...')
-          rev_resp = client.notify_revision(name='streamhub', revision_request=RevisionsRequestModel(upload_id=upload_id))
-          revision_num = rev_resp.revision
-          print(f'Revision {revision_num} registriert!')
-
-          print('3. Gebe Revision im stable Channel frei...')
-          client.release(name='streamhub', release_request=[ReleaseRequestModel(channel='stable', revision=revision_num)])
-          print('HERZLICHEN GLÜCKWUNSCH! StreamHub erfolgreich im Snap Store veröffentlicht!')
-          "
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: stable
