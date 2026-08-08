@@ -14,7 +14,7 @@ architectures:
 
 apps:
   streamhub:
-    command: streamhub/streamhub --no-sandbox
+    command: opt/streamhub/streamhub --no-sandbox
     extensions: [gnome]
     plugs:
       - network
@@ -29,4 +29,4 @@ parts:
     plugin: dump
     source: dist/linux-unpacked
     organize:
-      '*': streamhub/
+      '*': opt/streamhub/
