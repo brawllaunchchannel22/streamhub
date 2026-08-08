@@ -1,0 +1,32 @@
+name: streamhub
+base: core22
+version: '3.0.3'
+summary: Moderne Mediathek-App für deutsche Sender
+description: |
+  StreamHub ist deine zentrale Plattform für Inhalte der deutschen
+  öffentlich-rechtlichen Mediatheken (ARD, ZDF, Arte, 3Sat und mehr).
+
+grade: stable
+confinement: strict
+
+architectures:
+  - build-on: amd64
+
+apps:
+  streamhub:
+    command: streamhub/streamhub --no-sandbox
+    extensions: [gnome]
+    plugs:
+      - network
+      - network-status
+      - audio-playback
+      - opengl
+      - x11
+      - wayland
+
+parts:
+  streamhub:
+    plugin: dump
+    source: dist/linux-unpacked
+    organize:
+      '*': streamhub/
