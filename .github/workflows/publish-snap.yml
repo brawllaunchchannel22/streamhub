@@ -30,10 +30,14 @@ jobs:
         uses: snapcore/action-build@v1
         id: build
 
+      - name: Install Snapcraft CLI
+        run: sudo snap install snapcraft --classic
+
       - name: Publish Snap to Store
-        uses: snapcore/action-publish@v1
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-        with:
-          snap: ${{ steps.build.outputs.snap }}
-          release: stable
+        run: |
+          mkdir -p ~/.config/snapcraft
+          echo "$SNAPCRAFT_STORE_CREDENTIALS" > ~/.config/snapcraft/credentials.txt
+          snapcraft login --with ~/.config/snapcraft/credentials.txt || snapcraft login --with <(echo "$SNAPCRAFT_STORE_CREDENTIALS")
+          snapcraft upload --release=stable ${{ steps.build.outputs.snap }}
