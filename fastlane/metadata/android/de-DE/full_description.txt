@@ -1,0 +1,6 @@
+StreamHub ist deine zentrale Plattform für Inhalte der deutschen öffentlich-rechtlichen Mediatheken (ARD, ZDF, Arte, 3Sat und mehr).
+
+Funktionen:
+- Zugriff auf Livestreams und Mediatheken deutscher Sender
+- Moderne, schnelle Benutzeroberfläche
+- Keine Werbung, 100% Open Source
