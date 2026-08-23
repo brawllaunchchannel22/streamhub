@@ -43,6 +43,10 @@
                     </div>
                     <div id="searchHistoryDropdown" class="search-history-dropdown"></div>
                 </div>
+                <button id="profileBtn" class="profile-nav-btn" title="Benutzerprofil wechseln">
+                    <i class="fas fa-user" id="navProfileAvatar"></i>
+                    <span id="navProfileName" class="profile-nav-name">Hauptprofil</span>
+                </button>
                 <button id="filterToggle" class="icon-btn" title="Filter">
                     <i class="fas fa-sliders-h"></i>
                 </button>
@@ -172,6 +176,12 @@
             </div>
             <div class="filter-section">
                 <label class="checkbox-label">
+                    <input type="checkbox" id="hideAudioDescriptionToggle">
+                    <span>Hörfassungen / AD ausblenden</span>
+                </label>
+            </div>
+            <div class="filter-section">
+                <label class="checkbox-label">
                     <input type="checkbox" id="realThumbnailsToggle">
                     <span>Echte Thumbnails laden (langsamer)</span>
                 </label>
@@ -188,6 +198,14 @@
             <button id="closeHamburger" class="close-btn">&times;</button>
         </div>
         <div class="hamburger-content">
+            <div class="hamburger-profile-card" id="hamburgerProfileCard" title="Profil wechseln">
+                <div class="h-profile-avatar"><i class="fas fa-user" id="hProfileAvatar"></i></div>
+                <div class="h-profile-info">
+                    <span class="h-profile-name" id="hProfileName">Hauptprofil</span>
+                    <span class="h-profile-sub">Profil wechseln &bull; Datensicherung</span>
+                </div>
+                <i class="fas fa-chevron-right" style="color:var(--text-secondary,#94a3b8);font-size:0.8rem;"></i>
+            </div>
             <a href="#" class="hamburger-item" data-page="home">
                 <i class="fas fa-home"></i>
                 <span>Startseite</span>
@@ -582,7 +600,29 @@
                         <p class="setting-description">Kostenlosen Key auf <strong>themoviedb.org/settings/api</strong> holen &mdash; aktiviert Serien-Poster.<br>Ohne Key laufen alle anderen Features trotzdem normal.</p>
                     </div>
                 </div>
-<div class="settings-section">
+                <div class="settings-section">
+                    <h3><i class="fas fa-users" style="color:var(--primary-color,#6366f1);margin-right:.5rem;"></i>Profile & Datensicherung</h3>
+                    <div class="setting-item">
+                        <label>Benutzerprofile</label>
+                        <p class="setting-description">Verwalte getrennte Profile für Familie, Kinder oder verschiedene Interessen (Merkliste, Verlauf und Playlists sind pro Profil getrennt).</p>
+                        <div id="settingsProfilesList" class="settings-profiles-list"></div>
+                        <div style="margin-top: 10px;">
+                            <button id="openNewProfileBtn" class="btn-secondary"><i class="fas fa-plus"></i> Neues Profil erstellen</button>
+                        </div>
+                    </div>
+                    <div class="setting-item" style="margin-top: 18px;">
+                        <label>Save-File / Backup (Geräte-Synchronisation)</label>
+                        <p class="setting-description">Sichere deine Favoriten, Watchlists und Einstellungen in einer JSON-Datei oder übertrage sie auf dein Smartphone/Tablet ohne Online-Konto.</p>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px;">
+                            <button id="exportBackupBtn" class="btn-primary-inline"><i class="fas fa-file-export"></i> Backup exportieren (.json)</button>
+                            <label class="btn-secondary" style="cursor: pointer; margin: 0; display: inline-flex; align-items: center; gap: 8px;">
+                                <i class="fas fa-file-import"></i> Backup importieren
+                                <input type="file" id="importBackupInput" accept=".json" style="display: none;">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="settings-section">
                     <h3>Cache & Speicher</h3>
                     <div class="setting-item">
                         <button id="clearCache" class="btn-secondary">
@@ -652,9 +692,57 @@
             </div>
         </div>
         <div class="footer-bottom">
-            <p>&copy; 2026 StreamHub. Alle Rechte vorbehalten.</p>
+            <p>StreamHub ist ein freies Open-Source-Projekt (MIT-Lizenz). Alle Medieninhalte und Marken gehören den jeweiligen Rundfunkanstalten.</p>
         </div>
     </footer>
+
+    <!-- Profile Modal -->
+    <div id="profileModal" class="modal" style="display:none; z-index:99999;">
+        <div class="modal-backdrop" id="closeProfileModalBackdrop"></div>
+        <div class="modal-content profile-modal-content">
+            <div class="profile-modal-header">
+                <h3 style="display:flex; align-items:center; gap:8px; font-weight:700;">
+                    <i class="fas fa-users" style="color:var(--primary-color,#6366f1);"></i> Benutzerprofile
+                </h3>
+                <button class="modal-close" id="closeProfileModalBtn" style="position:static; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center;"><i class="fas fa-times"></i></button>
+            </div>
+            
+            <div id="profileListView" class="profile-list-view">
+                <p class="profile-modal-sub">Wähle ein Profil oder erstelle ein neues für getrennte Favoriten, Verlauf & Playlists:</p>
+                <div id="modalProfilesGrid" class="modal-profiles-grid"></div>
+                <div class="profile-modal-actions">
+                    <button id="modalNewProfileBtn" class="btn-primary-inline"><i class="fas fa-plus"></i> Neues Profil</button>
+                    <div class="profile-modal-actions-right">
+                        <button id="modalExportBackupBtn" class="btn-secondary" title="Sicherungsdatei exportieren"><i class="fas fa-file-export"></i> Backup</button>
+                        <label id="modalImportBackupLabel" class="btn-secondary" title="Sicherungsdatei importieren" style="cursor:pointer; margin:0;"><i class="fas fa-file-import"></i> Import<input type="file" id="modalImportBackupInput" accept=".json" style="display:none;"></label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Profile Edit / Create Form View -->
+            <div id="profileEditView" class="profile-edit-view" style="display:none;">
+                <h4 id="profileEditTitle" style="margin-bottom:14px; font-weight:600; font-size:1.05rem;">Profil bearbeiten</h4>
+                <div class="setting-item" style="margin-bottom:14px;">
+                    <label style="display:block; margin-bottom:6px; font-size:0.85rem; color:var(--text-secondary,#94a3b8);">Profilname</label>
+                    <input type="text" id="profileNameInput" class="setting-input" placeholder="z.B. Familie, Kinder, Dokus..." style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,0.05); color:#fff; border:1px solid var(--border-color);">
+                </div>
+                <div class="setting-item" style="margin-bottom:14px;">
+                    <label style="display:block; margin-bottom:6px; font-size:0.85rem; color:var(--text-secondary,#94a3b8);">Avatar auswählen</label>
+                    <div id="avatarPickerGrid" class="avatar-picker-grid"></div>
+                </div>
+                <div class="setting-item" style="margin-bottom:18px;">
+                    <label class="checkbox-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.9rem;">
+                        <input type="checkbox" id="profileIsKidsCheckbox">
+                        <span>Kinder-Profil (Fokus auf altersgerechte Inhalte)</span>
+                    </label>
+                </div>
+                <div style="display:flex; gap:10px; justify-content:flex-end;">
+                    <button id="cancelProfileEditBtn" class="btn-secondary" style="padding:8px 16px; border-radius:100px;">Abbrechen</button>
+                    <button id="saveProfileEditBtn" class="btn-primary-inline" style="padding:8px 18px; border-radius:100px;"><i class="fas fa-save"></i> Speichern</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- New Playlist Modal (Android compatible alternative to window.prompt) -->
     <div id="newPlaylistModal" class="modal" style="display:none; z-index:99999;">
@@ -707,6 +795,7 @@
                     <h2 id="videoTitle"></h2>
                     <div class="video-info-row">
                         <span id="videoChannel" class="channel-badge"></span>
+                        <span id="videoTopicBadge" class="series-link-badge" style="display: none;"><i class="fas fa-layer-group"></i> <span id="videoTopicName"></span></span>
                         <span id="videoDuration"></span>
                         <span id="videoDate"></span>
                         <span id="videoRating" style="display: none; font-weight: 600;"></span>
@@ -715,6 +804,9 @@
                 </div>
                 
                 <div class="video-actions">
+                    <button id="modalSeriesBtn" class="action-btn btn-to-series" title="Zur Serie & allen Staffeln" style="display: none;" tabindex="-1">
+                        <i class="fas fa-tv"></i> Zur Serie
+                    </button>
                     <div class="quality-selector-container">
                         <label for="speedSelector">
                             <i class="fas fa-tachometer-alt"></i> Tempo:

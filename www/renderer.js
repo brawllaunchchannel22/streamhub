@@ -1,93 +1,7 @@
 // StreamHub v2.4.0 - SIMPLE & STABLE VERSION
 console.log('StreamHub starting...');
 
-// ── Debug Overlay ─────────────────────────────────────────────────────────────
-(function() {
-    const MAX = 120;
-    const _entries = [];
-    let _panel = null;
-    let _visible = false;
 
-    function addEntry(level, args) {
-        const msg = args.map(a => {
-            try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch(e) { return String(a); }
-        }).join(' ');
-        const t = new Date().toISOString().substr(11, 8);
-        _entries.push({ t, level, msg });
-        if (_entries.length > MAX) _entries.shift();
-        if (_visible && _panel) renderPanel();
-    }
-
-    const _origLog   = console.log.bind(console);
-    const _origWarn  = console.warn.bind(console);
-    const _origError = console.error.bind(console);
-    console.log   = (...a) => { _origLog(...a);   addEntry('log',   a); };
-    console.warn  = (...a) => { _origWarn(...a);  addEntry('warn',  a); };
-    console.error = (...a) => { _origError(...a); addEntry('error', a); };
-
-    window.onerror = (msg, src, line, col, err) => {
-        addEntry('error', [`[UNCAUGHT] ${msg} @ ${src}:${line}`]);
-        return false;
-    };
-    window.onunhandledrejection = (ev) => {
-        addEntry('error', [`[PROMISE] ${ev.reason}`]);
-    };
-
-    function renderPanel() {
-        if (!_panel) return;
-        _panel.innerHTML = _entries.slice().reverse().map(e => {
-            const color = e.level === 'error' ? '#f87171' : e.level === 'warn' ? '#fbbf24' : '#a3e635';
-            return `<div style="border-bottom:1px solid rgba(255,255,255,0.07);padding:3px 4px;word-break:break-all;"><span style="color:#94a3b8;font-size:9px;">${e.t}</span> <span style="color:${color};font-size:10px;">${e.msg.replace(/</g,'&lt;')}</span></div>`;
-        }).join('');
-    }
-
-    function togglePanel() {
-        _visible = !_visible;
-        if (_visible) {
-            if (!_panel) {
-                _panel = document.createElement('div');
-                _panel.id = 'dbgPanel';
-                Object.assign(_panel.style, {
-                    position: 'fixed', bottom: '0', left: '0', right: '0', height: '42vh',
-                    background: 'rgba(10,10,20,0.97)', zIndex: '2147483647',
-                    overflowY: 'auto', fontFamily: 'monospace', fontSize: '11px',
-                    borderTop: '2px solid #818cf8', padding: '4px'
-                });
-                // Clear button
-                const clr = document.createElement('button');
-                clr.textContent = '✕ Close';
-                Object.assign(clr.style, {
-                    position: 'sticky', top: '2px', float: 'right',
-                    background: '#818cf8', color: '#fff', border: 'none',
-                    borderRadius: '6px', padding: '3px 10px', cursor: 'pointer', zIndex: '1'
-                });
-                clr.onclick = togglePanel;
-                _panel.appendChild(clr);
-                document.body.appendChild(_panel);
-            }
-            _panel.style.display = 'block';
-            renderPanel();
-        } else {
-            if (_panel) _panel.style.display = 'none';
-        }
-    }
-
-    // Triple-tap on top-right corner (60x60 px) to toggle
-    let _tapCount = 0, _tapTimer = null;
-    document.addEventListener('touchstart', (e) => {
-        const t = e.touches[0];
-        if (t.clientX > window.innerWidth - 70 && t.clientY < 70) {
-            _tapCount++;
-            clearTimeout(_tapTimer);
-            _tapTimer = setTimeout(() => { _tapCount = 0; }, 700);
-            if (_tapCount >= 3) { _tapCount = 0; togglePanel(); }
-        }
-    }, { passive: true });
-
-    // Also expose globally
-    window._dbgToggle = togglePanel;
-    console.log('[Debug] Overlay ready – triple-tap top-right corner to show');
-})();
 
 // API Configuration
 const API_URL = 'https://mediathekviewweb.de/api/query';
@@ -118,10 +32,642 @@ let localVideos = [];
 let currentDisplayItems = [];
 let previousPage = 'home';
 
+// ============================================================================
+// PROFILE & LOCAL SAVE-FILE BACKUP SYSTEM
+// ============================================================================
+
+const DEFAULT_PROFILE = {
+    id: 'default',
+    name: 'Hauptprofil',
+    avatar: 'fa-user',
+    isKids: false,
+    color: '#6366f1'
+};
+
+const PROFILE_AVATARS = [
+    { id: 'fa-user', label: 'Benutzer' },
+    { id: 'fa-user-ninja', label: 'Ninja' },
+    { id: 'fa-user-astronaut', label: 'Astronaut' },
+    { id: 'fa-child', label: 'Kind' },
+    { id: 'fa-film', label: 'Kino' },
+    { id: 'fa-tv', label: 'TV' },
+    { id: 'fa-heart', label: 'Herz' },
+    { id: 'fa-star', label: 'Stern' },
+    { id: 'fa-cat', label: 'Katze' },
+    { id: 'fa-dog', label: 'Hund' },
+    { id: 'fa-gamepad', label: 'Gamer' },
+    { id: 'fa-crown', label: 'Krone' }
+];
+
+let editingProfileId = null;
+let selectedAvatarIcon = 'fa-user';
+
+function getProfiles() {
+    try {
+        const stored = JSON.parse(localStorage.getItem('streamhubProfiles'));
+        if (Array.isArray(stored) && stored.length > 0) return stored;
+    } catch(e) {}
+    return [DEFAULT_PROFILE];
+}
+
+function saveProfiles(profiles) {
+    _safeSetItem('streamhubProfiles', JSON.stringify(profiles));
+}
+
+function getActiveProfileId() {
+    return localStorage.getItem('streamhubActiveProfileId') || 'default';
+}
+
+function getActiveProfile() {
+    const profiles = getProfiles();
+    const activeId = getActiveProfileId();
+    return profiles.find(p => p.id === activeId) || profiles[0] || DEFAULT_PROFILE;
+}
+
+function getProfileKey(baseKey) {
+    const activeId = getActiveProfileId();
+    if (activeId === 'default') {
+        return baseKey; // 100% backwards compatible with existing user data!
+    }
+    return `sh_p_${activeId}_${baseKey}`;
+}
+
+function updateProfileUI() {
+    const active = getActiveProfile();
+    
+    // Navbar
+    const navName = document.getElementById('navProfileName');
+    const navAvatar = document.getElementById('navProfileAvatar');
+    if (navName) navName.textContent = active.name;
+    if (navAvatar) navAvatar.className = `fas ${active.avatar || 'fa-user'}`;
+    
+    // Hamburger card
+    const hName = document.getElementById('hProfileName');
+    const hAvatar = document.getElementById('hProfileAvatar');
+    if (hName) hName.textContent = active.name;
+    if (hAvatar) hAvatar.className = `fas ${active.avatar || 'fa-user'}`;
+}
+
+function refreshCurrentPageData() {
+    if (currentPage === 'watchlist') {
+        loadWatchlistPage();
+    } else if (currentPage === 'watchlater') {
+        loadWatchLaterPage();
+    } else if (currentPage === 'playlists') {
+        loadPlaylistsPage();
+    } else if (currentPage === 'abos') {
+        loadAbosPage();
+    } else if (currentPage === 'history') {
+        loadFullHistoryPage();
+    } else if (currentPage === 'stats') {
+        loadStatsPage();
+    } else if (currentPage === 'home') {
+        loadRecentlyWatched();
+    }
+    renderProfileSettingsList();
+}
+
+function switchActiveProfile(profileId, skipNotify = false) {
+    const profiles = getProfiles();
+    const target = profiles.find(p => p.id === profileId);
+    if (!target) return;
+    
+    localStorage.setItem('streamhubActiveProfileId', profileId);
+    updateProfileUI();
+    
+    if (!skipNotify) {
+        showNotification(`Profil gewechselt zu: „${target.name}“`, 'info');
+    }
+    
+    // Clear search bar and active query when switching profile
+    if (searchInput) searchInput.value = '';
+    currentQuery = '';
+    currentCategory = '';
+    
+    // Return to home page and load clean recommendations
+    navigateToPage('home');
+    loadDefaultContent();
+    refreshCurrentPageData();
+    closeProfileModal();
+}
+
+function openProfileModal(startInEditMode = false) {
+    const modal = document.getElementById('profileModal');
+    if (!modal) return;
+    
+    if (startInEditMode) {
+        showProfileEditView(null);
+    } else {
+        showProfileListView();
+    }
+    modal.style.display = 'flex';
+}
+
+function closeProfileModal() {
+    const modal = document.getElementById('profileModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function showProfileListView() {
+    const listView = document.getElementById('profileListView');
+    const editView = document.getElementById('profileEditView');
+    if (listView) listView.style.display = 'block';
+    if (editView) editView.style.display = 'none';
+    renderModalProfilesGrid();
+}
+
+function showProfileEditView(profileId = null) {
+    editingProfileId = profileId;
+    const listView = document.getElementById('profileListView');
+    const editView = document.getElementById('profileEditView');
+    const titleEl = document.getElementById('profileEditTitle');
+    const nameInput = document.getElementById('profileNameInput');
+    const kidsCheckbox = document.getElementById('profileIsKidsCheckbox');
+    
+    if (listView) listView.style.display = 'none';
+    if (editView) editView.style.display = 'block';
+    
+    if (profileId) {
+        const profiles = getProfiles();
+        const profile = profiles.find(p => p.id === profileId);
+        if (titleEl) titleEl.textContent = 'Profil bearbeiten';
+        if (nameInput) nameInput.value = profile ? profile.name : '';
+        selectedAvatarIcon = profile ? (profile.avatar || 'fa-user') : 'fa-user';
+        if (kidsCheckbox) kidsCheckbox.checked = !!(profile && profile.isKids);
+    } else {
+        if (titleEl) titleEl.textContent = 'Neues Profil erstellen';
+        if (nameInput) nameInput.value = '';
+        selectedAvatarIcon = 'fa-user';
+        if (kidsCheckbox) kidsCheckbox.checked = false;
+    }
+    
+    renderAvatarPicker();
+    if (nameInput) setTimeout(() => nameInput.focus(), 100);
+}
+
+function renderAvatarPicker() {
+    const grid = document.getElementById('avatarPickerGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    
+    PROFILE_AVATARS.forEach(av => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `avatar-pick-btn ${selectedAvatarIcon === av.id ? 'selected' : ''}`;
+        btn.innerHTML = `<i class="fas ${av.id}"></i>`;
+        btn.title = av.label;
+        btn.addEventListener('click', () => {
+            selectedAvatarIcon = av.id;
+            renderAvatarPicker();
+        });
+        grid.appendChild(btn);
+    });
+}
+
+function renderModalProfilesGrid() {
+    const grid = document.getElementById('modalProfilesGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    
+    const profiles = getProfiles();
+    const activeId = getActiveProfileId();
+    
+    profiles.forEach(p => {
+        const isActive = p.id === activeId;
+        const card = document.createElement('div');
+        card.className = `profile-card ${isActive ? 'active' : ''}`;
+        
+        card.innerHTML = `
+            <div class="profile-card-avatar" style="${p.isKids ? 'background:#10b981;' : ''}">
+                <i class="fas ${p.avatar || 'fa-user'}"></i>
+            </div>
+            <div class="profile-card-details">
+                <div class="profile-card-name-row">
+                    <span class="profile-card-title">${p.name}</span>
+                    <div class="profile-badges-wrap">
+                        ${isActive ? '<span class="profile-badge-active">Aktiv</span>' : ''}
+                        ${p.isKids ? '<span class="profile-badge-kids"><i class="fas fa-child"></i> Kinder</span>' : ''}
+                    </div>
+                </div>
+                <div class="profile-card-meta">
+                    ${isActive ? 'Aktuelles Profil' : 'Klicken zum Wechseln'}
+                </div>
+            </div>
+            <div class="profile-card-actions">
+                <button class="profile-action-btn edit-p-btn" title="Bearbeiten"><i class="fas fa-pencil-alt"></i></button>
+                ${profiles.length > 1 && p.id !== 'default' ? '<button class="profile-action-btn btn-delete del-p-btn" title="Löschen"><i class="fas fa-trash"></i></button>' : ''}
+            </div>
+        `;
+        
+        // Whole card switches profile (unless an action button is clicked)
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.profile-action-btn')) return;
+            switchActiveProfile(p.id);
+        });
+        
+        card.querySelector('.edit-p-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            showProfileEditView(p.id);
+        });
+        
+        const delBtn = card.querySelector('.del-p-btn');
+        if (delBtn) {
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteProfile(p.id);
+            });
+        }
+        
+        grid.appendChild(card);
+    });
+}
+
+function renderProfileSettingsList() {
+    const list = document.getElementById('settingsProfilesList');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    const profiles = getProfiles();
+    const activeId = getActiveProfileId();
+    
+    profiles.forEach(p => {
+        const isActive = p.id === activeId;
+        const card = document.createElement('div');
+        card.className = `profile-card ${isActive ? 'active' : ''}`;
+        
+        card.innerHTML = `
+            <div class="profile-card-avatar" style="${p.isKids ? 'background:#10b981;' : ''}">
+                <i class="fas ${p.avatar || 'fa-user'}"></i>
+            </div>
+            <div class="profile-card-details">
+                <div class="profile-card-name-row">
+                    <span class="profile-card-title">${p.name}</span>
+                    <div class="profile-badges-wrap">
+                        ${isActive ? '<span class="profile-badge-active">Aktiv</span>' : ''}
+                        ${p.isKids ? '<span class="profile-badge-kids"><i class="fas fa-child"></i> Kinder</span>' : ''}
+                    </div>
+                </div>
+                <div class="profile-card-meta">
+                    ${isActive ? 'Standardprofil ausgewählt' : 'Klicken zum Aktivieren'}
+                </div>
+            </div>
+            <div class="profile-card-actions">
+                <button class="profile-action-btn edit-p-btn" title="Bearbeiten"><i class="fas fa-pencil-alt"></i></button>
+                ${profiles.length > 1 && p.id !== 'default' ? '<button class="profile-action-btn btn-delete del-p-btn" title="Löschen"><i class="fas fa-trash"></i></button>' : ''}
+            </div>
+        `;
+        
+        // Whole card switches profile (unless an action button is clicked)
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.profile-action-btn')) return;
+            switchActiveProfile(p.id);
+        });
+        
+        card.querySelector('.edit-p-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            openProfileModal();
+            showProfileEditView(p.id);
+        });
+        
+        const delBtn = card.querySelector('.del-p-btn');
+        if (delBtn) {
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteProfile(p.id);
+            });
+        }
+        
+        list.appendChild(card);
+    });
+}
+
+function saveCurrentProfileForm() {
+    const nameInput = document.getElementById('profileNameInput');
+    const kidsCheckbox = document.getElementById('profileIsKidsCheckbox');
+    const name = nameInput ? nameInput.value.trim() : '';
+    
+    if (!name) {
+        showNotification('Bitte gib einen Profilnamen ein.', 'warning');
+        return;
+    }
+    
+    let profiles = getProfiles();
+    
+    if (editingProfileId) {
+        // Edit existing
+        const p = profiles.find(x => x.id === editingProfileId);
+        if (p) {
+            p.name = name;
+            p.avatar = selectedAvatarIcon;
+            p.isKids = !!(kidsCheckbox && kidsCheckbox.checked);
+            saveProfiles(profiles);
+            showNotification(`Profil „${p.name}“ aktualisiert`, 'success');
+        }
+    } else {
+        // Create new
+        const newId = 'p_' + Date.now();
+        const newProfile = {
+            id: newId,
+            name: name,
+            avatar: selectedAvatarIcon,
+            isKids: !!(kidsCheckbox && kidsCheckbox.checked),
+            color: '#6366f1'
+        };
+        profiles.push(newProfile);
+        saveProfiles(profiles);
+        switchActiveProfile(newId, true);
+        showNotification(`Profil „${newProfile.name}“ erstellt und aktiviert!`, 'success');
+    }
+    
+    updateProfileUI();
+    showProfileListView();
+    renderProfileSettingsList();
+}
+
+function deleteProfile(profileId) {
+    if (profileId === 'default') {
+        showNotification('Das Hauptprofil kann nicht gelöscht werden.', 'warning');
+        return;
+    }
+    
+    let profiles = getProfiles();
+    const target = profiles.find(p => p.id === profileId);
+    if (!target) return;
+    
+    if (!confirm(`Möchtest du das Profil „${target.name}“ und alle zugehörigen Daten wirklich löschen?`)) {
+        return;
+    }
+    
+    // Remove profile-specific storage keys
+    const profileKeys = [
+        'streamhubWatchlist',
+        'streamhubWatchLater',
+        'streamhubPlaylists',
+        'recentlyWatched',
+        'videoProgressMap',
+        'streamhubSearchHistory',
+        'streamhub_abos'
+    ];
+    profileKeys.forEach(k => {
+        localStorage.removeItem(`sh_p_${profileId}_${k}`);
+    });
+    
+    profiles = profiles.filter(p => p.id !== profileId);
+    saveProfiles(profiles);
+    
+    if (getActiveProfileId() === profileId) {
+        switchActiveProfile('default', true);
+    }
+    
+    showNotification(`Profil „${target.name}“ wurde gelöscht.`, 'info');
+    renderModalProfilesGrid();
+    renderProfileSettingsList();
+    updateProfileUI();
+}
+
+// ── Export & Import Engine ──────────────────────────────────────────────────
+function exportStreamHubData() {
+    try {
+        const profiles = getProfiles();
+        const activeId = getActiveProfileId();
+        
+        const profileData = {};
+        const profileKeys = [
+            'streamhubWatchlist',
+            'streamhubWatchLater',
+            'streamhubPlaylists',
+            'recentlyWatched',
+            'videoProgressMap',
+            'streamhubSearchHistory',
+            'streamhub_abos'
+        ];
+        
+        profiles.forEach(p => {
+            const pId = p.id;
+            profileData[pId] = {};
+            profileKeys.forEach(k => {
+                const storageKey = (pId === 'default') ? k : `sh_p_${pId}_${k}`;
+                const val = localStorage.getItem(storageKey);
+                if (val !== null) {
+                    try { profileData[pId][k] = JSON.parse(val); }
+                    catch(e) { profileData[pId][k] = val; }
+                }
+            });
+        });
+        
+        const settings = {
+            selectedTheme: localStorage.getItem('selectedTheme') || 'dark',
+            useRealThumbnails: localStorage.getItem('useRealThumbnails') === 'true',
+            settingAutoplay: localStorage.getItem('settingAutoplay') !== 'false',
+            settingDefaultPlayer: localStorage.getItem('settingDefaultPlayer') || 'internal',
+            tmdbApiKey: localStorage.getItem('tmdbApiKey') || ''
+        };
+        
+        const backup = {
+            appName: 'StreamHub',
+            version: 3,
+            exportedAt: new Date().toISOString(),
+            activeProfileId: activeId,
+            profiles: profiles,
+            profileData: profileData,
+            settings: settings
+        };
+        
+        const jsonStr = JSON.stringify(backup, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        const dateStr = new Date().toISOString().split('T')[0];
+        a.href = url;
+        a.download = `streamhub_backup_${dateStr}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showNotification('✅ Backup-Datei erfolgreich exportiert!', 'success');
+    } catch(err) {
+        console.error('Export error:', err);
+        showNotification('❌ Fehler beim Export: ' + err.message, 'error');
+    }
+}
+
+function importStreamHubDataFromFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const text = e.target.result;
+            const backup = JSON.parse(text);
+            
+            if (!backup || (!backup.appName && !backup.profiles && !backup.profileData)) {
+                throw new Error('Ungültiges Dateiformat. Keine StreamHub-Sicherungsdatei.');
+            }
+            
+            const dateStr = backup.exportedAt ? new Date(backup.exportedAt).toLocaleDateString('de-DE') : 'unbekannt';
+            if (!confirm(`Möchtest du das Backup (erstellt am ${dateStr}) importieren?\n\nDeine bestehenden Profile bleiben erhalten, neue Profile aus dem Backup werden hinzugefügt.`)) {
+                return;
+            }
+            
+            // MERGE profiles (don't overwrite existing profiles!)
+            if (Array.isArray(backup.profiles) && backup.profiles.length > 0) {
+                const existingProfiles = getProfiles();
+                const existingIds = new Set(existingProfiles.map(p => p.id));
+                const newProfiles = backup.profiles.filter(p => !existingIds.has(p.id));
+                const merged = [...existingProfiles, ...newProfiles];
+                saveProfiles(merged);
+            }
+            
+            // Restore Data for imported profiles only
+            if (backup.profileData && typeof backup.profileData === 'object') {
+                const profileKeys = [
+                    'streamhubWatchlist',
+                    'streamhubWatchLater',
+                    'streamhubPlaylists',
+                    'recentlyWatched',
+                    'videoProgressMap',
+                    'streamhubSearchHistory',
+                    'streamhub_abos'
+                ];
+                
+                Object.keys(backup.profileData).forEach(pId => {
+                    const dataObj = backup.profileData[pId];
+                    if (!dataObj) return;
+                    profileKeys.forEach(k => {
+                        if (dataObj[k] !== undefined) {
+                            const storageKey = (pId === 'default') ? k : `sh_p_${pId}_${k}`;
+                            const valStr = typeof dataObj[k] === 'string' ? dataObj[k] : JSON.stringify(dataObj[k]);
+                            _safeSetItem(storageKey, valStr);
+                        }
+                    });
+                });
+            }
+            
+            // Restore Settings
+            if (backup.settings) {
+                if (backup.settings.selectedTheme) {
+                    localStorage.setItem('selectedTheme', backup.settings.selectedTheme);
+                    applyTheme(backup.settings.selectedTheme);
+                }
+                if (backup.settings.useRealThumbnails !== undefined) {
+                    localStorage.setItem('useRealThumbnails', backup.settings.useRealThumbnails);
+                    useRealThumbnails = backup.settings.useRealThumbnails;
+                }
+                if (backup.settings.tmdbApiKey) {
+                    localStorage.setItem('tmdbApiKey', backup.settings.tmdbApiKey);
+                }
+            }
+            
+            updateProfileUI();
+            refreshCurrentPageData();
+            renderProfileSettingsList();
+            renderModalProfilesGrid();
+            
+            showNotification('✅ Backup erfolgreich importiert! Profile wurden zusammengeführt.', 'success');
+        } catch(err) {
+            console.error('Import parse error:', err);
+            showNotification('❌ Fehler beim Import: ' + err.message, 'error');
+        }
+    };
+    reader.readAsText(file);
+}
+
+function initProfileSystem() {
+    updateProfileUI();
+    
+    // Top Nav button
+    const profileBtn = document.getElementById('profileBtn');
+    if (profileBtn) {
+        profileBtn.addEventListener('click', () => openProfileModal());
+    }
+    
+    // Hamburger profile card
+    const hamburgerProfileCard = document.getElementById('hamburgerProfileCard');
+    if (hamburgerProfileCard) {
+        hamburgerProfileCard.addEventListener('click', () => {
+            if (hamburgerSidebar) hamburgerSidebar.classList.remove('active');
+            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+            openProfileModal();
+        });
+    }
+    
+    // Modal buttons
+    const closeProfileModalBtn = document.getElementById('closeProfileModalBtn');
+    if (closeProfileModalBtn) closeProfileModalBtn.addEventListener('click', closeProfileModal);
+    
+    const closeProfileModalBackdrop = document.getElementById('closeProfileModalBackdrop');
+    if (closeProfileModalBackdrop) closeProfileModalBackdrop.addEventListener('click', closeProfileModal);
+    
+    const modalNewProfileBtn = document.getElementById('modalNewProfileBtn');
+    if (modalNewProfileBtn) modalNewProfileBtn.addEventListener('click', () => showProfileEditView(null));
+    
+    const openNewProfileBtn = document.getElementById('openNewProfileBtn');
+    if (openNewProfileBtn) openNewProfileBtn.addEventListener('click', () => openProfileModal(true));
+    
+    const cancelProfileEditBtn = document.getElementById('cancelProfileEditBtn');
+    if (cancelProfileEditBtn) cancelProfileEditBtn.addEventListener('click', showProfileListView);
+    
+    const saveProfileEditBtn = document.getElementById('saveProfileEditBtn');
+    if (saveProfileEditBtn) saveProfileEditBtn.addEventListener('click', saveCurrentProfileForm);
+    
+    // Export & Import buttons (modal)
+    const modalExportBackupBtn = document.getElementById('modalExportBackupBtn');
+    if (modalExportBackupBtn) modalExportBackupBtn.addEventListener('click', exportStreamHubData);
+    
+    const modalImportBackupInput = document.getElementById('modalImportBackupInput');
+    if (modalImportBackupInput) {
+        modalImportBackupInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                importStreamHubDataFromFile(e.target.files[0]);
+                e.target.value = '';
+            }
+        });
+    }
+
+    // Export & Import buttons (settings page)
+    const exportBackupBtn = document.getElementById('exportBackupBtn');
+    if (exportBackupBtn) exportBackupBtn.addEventListener('click', exportStreamHubData);
+    
+    const importBackupInput = document.getElementById('importBackupInput');
+    if (importBackupInput) {
+        importBackupInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                importStreamHubDataFromFile(e.target.files[0]);
+                e.target.value = '';
+            }
+        });
+    }
+
+    // Close profile modal when clicking any nav category tab
+    document.querySelectorAll('.nav-categories a').forEach(link => {
+        link.addEventListener('click', () => closeProfileModal());
+    });
+    
+    renderProfileSettingsList();
+}
+
+// --- History Storage Helpers ---
+function getRecentlyWatched() {
+    try {
+        return JSON.parse(localStorage.getItem(getProfileKey('recentlyWatched')) || '[]');
+    } catch(e) {
+        return [];
+    }
+}
+
+function saveRecentlyWatched(recent) {
+    try {
+        _safeSetItem(getProfileKey('recentlyWatched'), JSON.stringify(recent));
+    } catch(e) {
+        console.error('saveRecentlyWatched error:', e);
+    }
+}
+
 // --- Suchverlauf (Search History) Helpers ---
 function getSearchHistory() {
     try {
-        return JSON.parse(localStorage.getItem('streamhubSearchHistory') || '[]');
+        return JSON.parse(localStorage.getItem(getProfileKey('streamhubSearchHistory')) || '[]');
     } catch (e) {
         return [];
     }
@@ -137,7 +683,7 @@ function saveSearchQuery(query) {
         if (history.length > 10) {
             history = history.slice(0, 10);
         }
-        localStorage.setItem('streamhubSearchHistory', JSON.stringify(history));
+        _safeSetItem(getProfileKey('streamhubSearchHistory'), JSON.stringify(history));
     } catch (e) {
         console.error('Error saving search query:', e);
     }
@@ -147,7 +693,7 @@ function removeSearchQuery(query) {
     try {
         let history = getSearchHistory();
         history = history.filter(item => item.toLowerCase() !== query.toLowerCase());
-        localStorage.setItem('streamhubSearchHistory', JSON.stringify(history));
+        _safeSetItem(getProfileKey('streamhubSearchHistory'), JSON.stringify(history));
     } catch (e) {
         console.error('Error removing search query:', e);
     }
@@ -253,7 +799,8 @@ function _safeSetItem(key, value) {
 let _progressSaveTimer = 0;
 function saveVideoProgress(url, currentTime, duration) {
     try {
-        const progressMap = JSON.parse(localStorage.getItem('videoProgressMap') || '{}');
+        const key = getProfileKey('videoProgressMap');
+        const progressMap = JSON.parse(localStorage.getItem(key) || '{}');
         progressMap[url] = {
             currentTime: currentTime,
             duration: duration,
@@ -266,7 +813,7 @@ function saveVideoProgress(url, currentTime, duration) {
             const sorted = keys.sort((a, b) => progressMap[a].timestamp - progressMap[b].timestamp);
             for (let i = 0; i < keys.length - 50; i++) delete progressMap[sorted[i]];
         }
-        _safeSetItem('videoProgressMap', JSON.stringify(progressMap));
+        _safeSetItem(key, JSON.stringify(progressMap));
     } catch (e) {
         console.error('Error saving progress: ' + e.name);
     }
@@ -274,7 +821,8 @@ function saveVideoProgress(url, currentTime, duration) {
 
 function getVideoProgress(url) {
     try {
-        const progressMap = JSON.parse(localStorage.getItem('videoProgressMap') || '{}');
+        const key = getProfileKey('videoProgressMap');
+        const progressMap = JSON.parse(localStorage.getItem(key) || '{}');
         return progressMap[url] || null;
     } catch (e) {
         return null;
@@ -283,10 +831,11 @@ function getVideoProgress(url) {
 
 function removeVideoProgress(url) {
     try {
-        const progressMap = JSON.parse(localStorage.getItem('videoProgressMap') || '{}');
+        const key = getProfileKey('videoProgressMap');
+        const progressMap = JSON.parse(localStorage.getItem(key) || '{}');
         if (progressMap[url]) {
             delete progressMap[url];
-            _safeSetItem('videoProgressMap', JSON.stringify(progressMap));
+            _safeSetItem(key, JSON.stringify(progressMap));
         }
     } catch (e) {}
 }
@@ -294,7 +843,7 @@ function removeVideoProgress(url) {
 // --- Watchlist Helpers ---
 function getWatchlist() {
     try {
-        return JSON.parse(localStorage.getItem('streamhubWatchlist') || '[]');
+        return JSON.parse(localStorage.getItem(getProfileKey('streamhubWatchlist')) || '[]');
     } catch (e) {
         return [];
     }
@@ -323,7 +872,7 @@ function toggleWatchlist(item, btnEl) {
         } else {
             list.splice(idx, 1);
         }
-        _safeSetItem('streamhubWatchlist', JSON.stringify(list));
+        _safeSetItem(getProfileKey('streamhubWatchlist'), JSON.stringify(list));
         console.log('[WL] saved newLen=' + list.length);
         if (btnEl) {
             btnEl.classList.toggle('watchlist-active', adding);
@@ -342,7 +891,7 @@ function toggleWatchlist(item, btnEl) {
 
 // ── Watch Later (Später ansehen) ──────────────────────────────────────────────
 function getWatchLater() {
-    try { return JSON.parse(localStorage.getItem('streamhubWatchLater') || '[]'); }
+    try { return JSON.parse(localStorage.getItem(getProfileKey('streamhubWatchLater')) || '[]'); }
     catch (e) { return []; }
 }
 
@@ -371,7 +920,7 @@ function toggleWatchLater(item, btnEl) {
             list.splice(idx, 1);
             showNotification('Aus „Später ansehen" entfernt', 'info');
         }
-        _safeSetItem('streamhubWatchLater', JSON.stringify(list));
+        _safeSetItem(getProfileKey('streamhubWatchLater'), JSON.stringify(list));
         console.log('[WLater] saved newLen=' + list.length);
         if (btnEl) {
             btnEl.classList.toggle('watchlater-active', adding);
@@ -389,12 +938,12 @@ function toggleWatchLater(item, btnEl) {
 
 // ── Playlists & Card Context Menu System ─────────────────────────────────────
 function getPlaylists() {
-    try { return JSON.parse(localStorage.getItem('streamhubPlaylists') || '[]'); }
+    try { return JSON.parse(localStorage.getItem(getProfileKey('streamhubPlaylists')) || '[]'); }
     catch(e) { return []; }
 }
 
 function savePlaylists(playlists) {
-    _safeSetItem('streamhubPlaylists', JSON.stringify(playlists));
+    _safeSetItem(getProfileKey('streamhubPlaylists'), JSON.stringify(playlists));
 }
 
 function createPlaylist(title) {
@@ -565,7 +1114,7 @@ function loadWatchlistPage() {
 
 function clearWatchlist() {
     if (confirm('Merkliste wirklich leeren?')) {
-        localStorage.removeItem('streamhubWatchlist');
+        localStorage.removeItem(getProfileKey('streamhubWatchlist'));
         loadWatchlistPage();
     }
 }
@@ -583,7 +1132,7 @@ function loadWatchLaterPage() {
     if (clearBtn) {
         clearBtn.onclick = () => {
             if (confirm('„Später ansehen" Liste wirklich leeren?')) {
-                localStorage.removeItem('streamhubWatchLater');
+                localStorage.removeItem(getProfileKey('streamhubWatchLater'));
                 loadWatchLaterPage();
             }
         };
@@ -812,6 +1361,9 @@ function init() {
                 if (window._syncNativeBackHandler) window._syncNativeBackHandler();
             });
         }
+
+        // Initialize Profile and Backup Save-File System
+        initProfileSystem();
         // Spacebar on the video element: stop native handling AND stop propagation
         // so the document-level handler below doesn't double-fire.
         if (videoPlayer) {
@@ -1036,8 +1588,16 @@ function attachEventListeners() {
     // Search
     if (searchInput) {
         searchInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && searchInput.value.trim()) {
-                performSearch(searchInput.value.trim());
+            if (e.key === 'Enter') {
+                const val = searchInput.value.trim();
+                if (val) {
+                    performSearch(val);
+                } else {
+                    currentQuery = '';
+                    currentCategory = '';
+                    currentResults = [];
+                    loadDefaultContent();
+                }
             }
         });
 
@@ -1056,8 +1616,18 @@ function attachEventListeners() {
         });
 
         searchInput.addEventListener('input', () => {
-            if (!searchInput.value.trim()) showSearchHistoryDropdown();
-            else hideSearchHistoryDropdown();
+            if (!searchInput.value.trim()) {
+                showSearchHistoryDropdown();
+                // When search field is emptied, automatically reset results back to FYP highlights
+                if (currentQuery || (sectionTitle && sectionTitle.textContent && sectionTitle.textContent.includes('Ergebnisse'))) {
+                    currentQuery = '';
+                    currentCategory = '';
+                    currentResults = [];
+                    loadDefaultContent();
+                }
+            } else {
+                hideSearchHistoryDropdown();
+            }
         });
 
         // Hide dropdown when clicking outside
@@ -1084,7 +1654,11 @@ function attachEventListeners() {
                 navigateToPage(page);
             } else if (category === 'home') {
                 if (searchInput) searchInput.value = '';
+                currentQuery = '';
+                currentCategory = '';
+                currentResults = [];
                 navigateToPage('home');
+                loadDefaultContent();
             } else if (category) {
                 // Category search
                 const sections = [
@@ -1118,10 +1692,14 @@ function attachEventListeners() {
     if (logoEl) {
         const goHome = () => {
             if (searchInput) searchInput.value = '';
+            currentQuery = '';
+            currentCategory = '';
+            currentResults = [];
             document.querySelectorAll('.nav-categories a').forEach(l => l.classList.remove('active'));
             const startTab = document.querySelector('.nav-categories a[data-category="home"]');
             if (startTab) startTab.classList.add('active');
             navigateToPage('home');
+            loadDefaultContent();
         };
         logoEl.addEventListener('click', goHome);
         logoEl.addEventListener('touchend', (e) => { e.preventDefault(); goHome(); }, { passive: false });
@@ -1918,12 +2496,59 @@ function attachEventListeners() {
 }
 
 // Load Default Content
+// Filter out content unsuitable for children when kids profile is active
+function filterKidsSafe(items) {
+    if (!items || !Array.isArray(items)) return [];
+    const active = getActiveProfile();
+    if (!active || !active.isKids) return items;
+    
+    // Comprehensive block patterns for kids mode (case-insensitive substring check)
+    const blockedKeywords = [
+        // Reproductive / Sexual / Adult topics
+        'kinderwunsch', 'embryo', 'embryonentransfer', 'abtreibung', 'schwangerschaft',
+        'erotik', 'erotisch', 'sex', 'sexual', 'nackt', 'nacktheit', 'porno', 'bordell', 
+        'prostitut', 'stripper', 'affäre', 'fsk 16', 'fsk 18', 'ab 16', 'ab 18',
+        
+        // Crime / Murder / Horror / Thriller
+        'tatort', 'polizeiruf', 'krimi', 'mord', 'mörder', 'tötung', 'leiche', 'blut', 
+        'horror', 'thriller', 'true crime', 'verbrechen', 'serienmörder', 'forensik',
+        'obduktion', 'pathologie', 'erdrosselt', 'erstochen', 'erschossen', 'ermordet',
+        
+        // Violence / War / Terrorism / Crisis
+        'krieg', 'waffen', 'attentat', 'massaker', 'gewalt', 'hinrichtung', 'folter', 
+        'terror', 'terrorist', 'amok', 'geisel', 'schießerei', 'bombe', 'anschlag', 
+        'luftangriff', 'raketen', 'frontlinie', 'soldaten', 'ukraine-krieg', 'nahost-konflikt',
+        'hamas', 'israel-gaza', 'putin', 'taliban',
+        
+        // Drugs / Abuse / Suicide
+        'drogen', 'sucht', 'süchtig', 'alkohol', 'kokain', 'heroin', 'cannabis', 
+        'missbrauch', 'vergewaltigung', 'trauma', 'suizid', 'selbstmord', 'sterbehilfe',
+        'psychiatrie', 'psychose', 'geschlossene anstalt',
+        
+        // Prison / Court
+        'gefängnis', 'haft', 'strafvollzug', 'justizvollzugsanstalt', 'jva', 'anklagebank',
+        
+        // Adult Politics / Economy / Hard News
+        'bundestagswahl', 'parteitag', 'wahlkampf', 'inflation', 'insolvenz', 'finanzkrise',
+        'steuern', 'steuerhinterziehung', 'börsencrash', 'rente', 'altersarmut'
+    ];
+    
+    return items.filter(item => {
+        const text = `${item.title || ''} ${item.topic || ''} ${item.description || ''}`.toLowerCase();
+        return !blockedKeywords.some(kw => text.includes(kw));
+    });
+}
+
 async function loadDefaultContent() {
     try {
         console.log('loadDefaultContent() called');
         currentPage = 'home';
+        const isKids = getActiveProfile().isKids;
         if (sectionTitle) {
-            sectionTitle.innerHTML = '<i class="fas fa-fire"></i> Für dich empfohlen <button id="fypRefreshBtn" onclick="loadDefaultContent()" title="Aktualisieren" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;margin-left:8px;font-size:0.9rem;"><i class="fas fa-sync-alt"></i></button>';
+            const titleHtml = isKids 
+                ? '<i class="fas fa-child" style="color:#10b981;"></i> Für dich empfohlen (Kinder-Modus)' 
+                : '<i class="fas fa-fire"></i> Für dich empfohlen';
+            sectionTitle.innerHTML = `${titleHtml} <button id="fypRefreshBtn" onclick="loadDefaultContent()" title="Aktualisieren" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;margin-left:8px;font-size:0.9rem;"><i class="fas fa-sync-alt"></i></button>`;
         }
         await loadRecommendations();
     } catch (error) {
@@ -1934,7 +2559,7 @@ async function loadDefaultContent() {
 // Build personalized query from watch history
 function buildPersonalizedQuery() {
     try {
-        const history = JSON.parse(localStorage.getItem('streamhubHistory') || '[]');
+        const history = getRecentlyWatched();
         if (history.length < 3) return null;
         const recent = history.slice(0, 30);
         const skip = new Set(['der','die','das','ein','eine','und','mit','im','in','auf','zu','von','an','am','ist','für','bei','wie','aus','was','ich','du','wir','sie','es','er','aber','oder','nicht','noch','auch','schon','mal','sehr','mehr','dem','den','des','wird','eine','nach','beim','über','alle','als','hat','war']);
@@ -1947,9 +2572,42 @@ function buildPersonalizedQuery() {
                     if (w.length > 4 && !skip.has(w)) freq[w] = (freq[w] || 0) + 1;
                 });
         });
-        const topWords = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0,2).map(([w]) => w);
-        return topWords.length > 0 ? topWords.join(' ') : null;
+        const topWords = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0,5).map(([w]) => w);
+        if (topWords.length > 0) {
+            // Pick a random interest from top words to avoid locking forever into the single most recent word
+            return topWords[Math.floor(Math.random() * topWords.length)];
+        }
+        return null;
     } catch { return null; }
+}
+
+// Helper: Clean Hörfassung / AD from title and topic
+function cleanEpisodeTitle(title) {
+    if (!title) return '';
+    return title
+        .replace(/\s*[\(\[]Hörfassung[\)\]]/gi, '')
+        .replace(/\s*[\(\[]Audiodeskription[\)\]]/gi, '')
+        .replace(/\s*[\(\[]AD[\)\]]/gi, '')
+        .replace(/\s*-\s*Hörfassung/gi, '')
+        .replace(/\s*-\s*Audiodeskription/gi, '')
+        .trim();
+}
+
+function cleanTopic(topic) {
+    if (!topic) return '';
+    return topic
+        .replace(/\s*[\(\[]Hörfassung[\)\]]/gi, '')
+        .replace(/\s*[\(\[]Audiodeskription[\)\]]/gi, '')
+        .replace(/\s*[\(\[]AD[\)\]]/gi, '')
+        .replace(/\s*-\s*Hörfassung/gi, '')
+        .replace(/\s*-\s*Audiodeskription/gi, '')
+        .trim();
+}
+
+function isAudioDescription(item) {
+    if (!item) return false;
+    const text = `${item.title || ''} ${item.topic || ''} ${item.description || ''}`.toLowerCase();
+    return text.includes('hörfassung') || text.includes('audiodeskription');
 }
 
 // Load Recommendations
@@ -1959,19 +2617,38 @@ async function loadRecommendations() {
         console.log('Loading recommendations...');
         currentCategory = '';
 
-        // Try personalized query based on watch history first
-        const personalQuery = buildPersonalizedQuery();
-        const fallbackCategories = ['Dokumentation', 'Spielfilm', 'Tatort', 'Reportage', 'Krimi'];
-        const query = personalQuery || fallbackCategories[Math.floor(Math.random() * fallbackCategories.length)];
-
-        const payload = {
-            queries: [{ fields: ["title", "topic", "description"], query }],
-            sortBy: "timestamp",
-            sortOrder: "desc",
-            future: true,
-            offset: 0,
-            size: 60
-        };
+        const isKids = getActiveProfile().isKids;
+        const fallbackCategories = ['Dokumentation', 'Spielfilm', 'Tatort', 'Reportage', 'Krimi', 'Terra X', 'Comedy', 'Natur', 'Kultur'];
+        
+        let payload;
+        if (isKids) {
+            // Load diverse and colorful catalog from KiKA channel with rotating offset
+            const randomOffset = Math.floor(Math.random() * 4) * 30;
+            payload = {
+                queries: [
+                    { fields: ["channel"], query: "KiKA" }
+                ],
+                sortBy: "timestamp",
+                sortOrder: "desc",
+                future: true,
+                offset: randomOffset,
+                size: 150
+            };
+        } else {
+            const personalQuery = buildPersonalizedQuery();
+            const query = (personalQuery && Math.random() > 0.4) 
+                ? personalQuery 
+                : fallbackCategories[Math.floor(Math.random() * fallbackCategories.length)];
+            const randomOffset = Math.floor(Math.random() * 3) * 20;
+            payload = {
+                queries: [{ fields: ["title", "topic", "description"], query }],
+                sortBy: "timestamp",
+                sortOrder: "desc",
+                future: true,
+                offset: randomOffset,
+                size: 100
+            };
+        }
 
         const response = await fetch(API_URL, {
             method: 'POST',
@@ -1981,16 +2658,30 @@ async function loadRecommendations() {
 
         if (response.ok) {
             const data = await response.json();
-            const results = data.result?.results || [];
+            let results = data.result?.results || [];
+            if (isKids) {
+                results = filterKidsSafe(results);
+            }
             if (results.length > 0) {
+                // Interleave series so no single series occupies the top 20 items in recommendations
+                const topicCount = {};
+                const headList = [];
+                const tailList = [];
+                results.forEach(item => {
+                    const t = (item.topic || item.title || '').trim().toLowerCase();
+                    topicCount[t] = (topicCount[t] || 0) + 1;
+                    if (topicCount[t] <= 2) {
+                        headList.push(item);
+                    } else {
+                        tailList.push(item);
+                    }
+                });
+                results = [...headList, ...tailList];
+
                 currentResults = results;
                 originalResults = [...currentResults];
-                currentResults = currentResults.sort(() => Math.random() - 0.5);
                 displayResults();
                 showLoading(false);
-                if (personalQuery) {
-                    console.log('[FYP] Personalized query:', personalQuery);
-                }
                 return;
             }
         }
@@ -1999,7 +2690,8 @@ async function loadRecommendations() {
     }
 
     // Fallback: search default category
-    await performSearch('Dokumentation');
+    const fallbackCategory = getActiveProfile().isKids ? 'KiKA' : 'Dokumentation';
+    await performSearch(fallbackCategory);
 }
 
 // Track if a search is in progress so navigateToPage doesn't flash FYP content
@@ -2030,7 +2722,7 @@ async function performSearch(query) {
         console.log('Searching for:', query);
         
         // Save to search query history (skip generic category searches)
-        if (query && query !== 'Tatort' && query !== 'Dokumentation' && query !== 'Spielfilm' && query !== 'Nachrichten' && query !== 'Sport' && query !== 'Kinder' && query !== 'Reportage') {
+        if (query && query !== 'Tatort' && query !== 'Dokumentation' && query !== 'Spielfilm' && query !== 'Nachrichten' && query !== 'Sport' && query !== 'Kinder' && query !== 'KiKA' && query !== 'Reportage') {
             saveSearchQuery(query);
         }
         hideSearchHistoryDropdown();
@@ -2046,16 +2738,31 @@ async function performSearch(query) {
         
         showLoading(true);
         
-        const payload = {
-            queries: [
-                { fields: ["title", "topic", "description"], query: query }
-            ],
-            sortBy: "timestamp",
-            sortOrder: "desc",
-            future: true,
-            offset: 0,
-            size: 200
-        };
+        let payload;
+        if (query.trim().toLowerCase() === 'kinder' || query.trim().toLowerCase() === 'kika') {
+            // Dedicated Kids television catalog (KiKA channel)
+            payload = {
+                queries: [
+                    { fields: ["channel"], query: "KiKA" }
+                ],
+                sortBy: "timestamp",
+                sortOrder: "desc",
+                future: true,
+                offset: 0,
+                size: 200
+            };
+        } else {
+            payload = {
+                queries: [
+                    { fields: ["title", "topic", "description"], query: query }
+                ],
+                sortBy: "timestamp",
+                sortOrder: "desc",
+                future: true,
+                offset: 0,
+                size: 200
+            };
+        }
         
         const response = await fetch(API_URL, {
             method: 'POST',
@@ -2068,7 +2775,11 @@ async function performSearch(query) {
         }
         
         const data = await response.json();
-        currentResults = data.result?.results || [];
+        let rawResults = data.result?.results || [];
+        if (getActiveProfile().isKids) {
+            rawResults = filterKidsSafe(rawResults);
+        }
+        currentResults = rawResults;
         originalResults = [...currentResults];
         console.log('Found', currentResults.length, 'videos for:', query);
         
@@ -2202,6 +2913,13 @@ class EpisodeParser {
         let episode = null;
         let confidence = 0; // Wie sicher ist die Erkennung (0-100)
 
+        // Check for separate Staffel mention in title/description (e.g. "Staffel 2", "2. Staffel", "Season 3")
+        let detectedSeason = 1;
+        const separateStaffel = this.combined.match(/(?:staffel|season)\s*(\d{1,2})/i) || this.combined.match(/(\d{1,2})\.\s*staffel/i);
+        if (separateStaffel) {
+            detectedSeason = parseInt(separateStaffel[1], 10);
+        }
+
         // Pattern 1: S01E01, S1E1 (sehr sicher)
         const sxex = this.combined.match(/\bs(\d{1,2})e(\d{1,3})\b/i);
         if (sxex) {
@@ -2223,7 +2941,7 @@ class EpisodeParser {
         // Pattern 3: Folge X / Episode X (ohne Staffel)
         const folge = this.combined.match(/(?:folge|episode)[\s:]?(\d{1,3})/i);
         if (folge) {
-            season = 1; // Default auf Staffel 1
+            season = detectedSeason;
             episode = parseInt(folge[1], 10);
             confidence = 80;
             return { season, episode, confidence, pattern: 'Folge X' };
@@ -2232,7 +2950,7 @@ class EpisodeParser {
         // Pattern 4: Teil X
         const teil = this.combined.match(/teil[\s:]?(\d{1,3})/i);
         if (teil) {
-            season = 1;
+            season = detectedSeason;
             episode = parseInt(teil[1], 10);
             confidence = 75;
             return { season, episode, confidence, pattern: 'Teil X' };
@@ -2241,7 +2959,7 @@ class EpisodeParser {
         // Pattern 5: (X/Y) oder X/Y - z.B. "(1/4)" oder "1/4"
         const fraction = this.combined.match(/\(?(\d{1,3})\/(\d{1,3})\)?/);
         if (fraction) {
-            season = 1;
+            season = detectedSeason;
             episode = parseInt(fraction[1], 10);
             confidence = 70;
             return { season, episode, confidence, pattern: 'X/Y', total: parseInt(fraction[2], 10) };
@@ -2250,7 +2968,7 @@ class EpisodeParser {
         // Pattern 6: Führende Nummer mit Trennzeichen: "01 - ", "1. ", "(1) "
         const leadingNumber = this.title.match(/^(?:\()?(\d{1,3})(?:\)|\.|\s*-)\s+/);
         if (leadingNumber) {
-            season = 1;
+            season = detectedSeason;
             episode = parseInt(leadingNumber[1], 10);
             confidence = 60;
             return { season, episode, confidence, pattern: 'Leading Number' };
@@ -2262,7 +2980,7 @@ class EpisodeParser {
             const num = parseInt(anyNumber[1], 10);
             // Nur wenn die Nummer plausibel ist (1-200)
             if (num > 0 && num <= 200) {
-                season = 1;
+                season = detectedSeason;
                 episode = num;
                 confidence = 40;
                 return { season, episode, confidence, pattern: 'Any Number' };
@@ -2284,7 +3002,7 @@ class EpisodeParser {
 function normalizeTopicKey(topic) {
     if (!topic || topic.trim() === '') return null;
     
-    return topic
+    return cleanTopic(topic)
         .trim()
         .toLowerCase()
         // Entferne Artikel am Anfang
@@ -2314,45 +3032,21 @@ function isSeriesContext(items) {
     
     console.log('[isSeriesContext] Prüfe', items.length, 'Items');
     
-    // Gruppiere nach Topic (normalisiert)
     const topicGroups = new Map();
     
     items.forEach(item => {
-        const normalizedTopic = normalizeTopicKey(item.topic);
+        const cleanedTopic = cleanTopic(item.topic);
+        const normalizedTopic = normalizeTopicKey(cleanedTopic);
         
-        // FILTER: Hörfassungen überspringen
-        const titleLower = (item.title || '').toLowerCase();
-        const topicLower = (item.topic || '').toLowerCase();
-        const descLower = (item.description || '').toLowerCase();
+        if (!normalizedTopic || isBlacklisted(cleanedTopic)) return;
         
-        if (titleLower.includes('hörfassung') || 
-            titleLower.includes('audiodeskription') ||
-            topicLower.includes('hörfassung') ||
-            topicLower.includes('audiodeskription') ||
-            descLower.includes('hörfassung') ||
-            descLower.includes('audiodeskription')) {
-            return; // Skip Hörfassungen komplett
-        }
-        
-        // Skip wenn kein Topic oder blacklisted
-        if (!normalizedTopic) return;
-        if (isBlacklisted(item.topic)) {
-            console.log('[isSeriesContext] Blacklisted:', item.topic);
-            return;
-        }
-        
-        // Prüfe ob es eine Episode ist
         const parser = new EpisodeParser(item.title, item.description);
-        if (!parser.isSeries()) {
-            console.log('[isSeriesContext] Keine Episode:', item.title);
-            return;
-        }
+        if (!parser.isSeries()) return;
         
-        // Zähle diese Topic-Gruppe
         if (!topicGroups.has(normalizedTopic)) {
             topicGroups.set(normalizedTopic, {
                 count: 0,
-                originalTopic: item.topic,
+                originalTopic: cleanedTopic,
                 items: []
             });
         }
@@ -2362,12 +3056,6 @@ function isSeriesContext(items) {
         group.items.push(item);
     });
     
-    // Logge die Topic-Gruppen
-    topicGroups.forEach((group, key) => {
-        console.log(`[isSeriesContext] Topic: "${group.originalTopic}" (${key}) → ${group.count} Episoden`);
-    });
-    
-    // Wenn mindestens eine Topic-Gruppe 3+ Episoden hat → Series Context
     for (const group of topicGroups.values()) {
         if (group.count >= 3) {
             console.log('[isSeriesContext] ✓ Serie erkannt:', group.originalTopic);
@@ -2375,107 +3063,55 @@ function isSeriesContext(items) {
         }
     }
     
-    console.log('[isSeriesContext] ✗ Keine Serie erkannt');
     return false;
 }
 
 // REGEL 1 + 2 + 3: displaySeriesGrouped - Topic-basierte Gruppierung
 // Group all results by series (topic-based)
 function groupAllResults(items) {
-    const seriesMap = new Map();
+    const hideAD = document.getElementById('hideAudioDescriptionToggle')?.checked || false;
+    const topicMap = new Map();
     const standaloneVideos = [];
     
     items.forEach((item) => {
-        const normalizedTopic = normalizeTopicKey(item.topic);
-        
-        // FILTER: Hörfassungen komplett rauswerfen (Topic ODER Title)
-        const titleLower = (item.title || '').toLowerCase();
-        const topicLower = (item.topic || '').toLowerCase();
-        const descLower = (item.description || '').toLowerCase();
-        
-        if (titleLower.includes('hörfassung') || 
-            titleLower.includes('audiodeskription') ||
-            topicLower.includes('hörfassung') ||
-            topicLower.includes('audiodeskription') ||
-            descLower.includes('hörfassung') ||
-            descLower.includes('audiodeskription')) {
-            return; // Skip Hörfassungen komplett
+        if (hideAD && isAudioDescription(item)) {
+            return;
         }
+
+        const cleanedTopic = cleanTopic(item.topic);
+        const normalizedTopic = normalizeTopicKey(cleanedTopic);
         
-        // Kein Topic -> Standalone
-        if (!normalizedTopic) {
+        // Kein Topic oder blacklisted -> Standalone
+        if (!normalizedTopic || isBlacklisted(cleanedTopic)) {
             standaloneVideos.push(item);
             return;
         }
         
-        // Blacklisted -> Standalone
-        if (isBlacklisted(item.topic)) {
-            standaloneVideos.push(item);
-            return;
-        }
-        
-        // Prüfe ob Episode
-        const parser = new EpisodeParser(item.title, item.description);
-        const parseResult = parser.parse();
-        
-        if (parseResult.confidence < 40) {
-            // Keine Episode erkannt -> Standalone
-            standaloneVideos.push(item);
-            return;
-        }
-        
-        // For Emma's Chatroom specifically: force parsedSeason to be 1 as requested by the user
-        let parsedSeason = parseResult.season;
-        if (normalizedTopic === 'emmas chatroom') {
-            parsedSeason = 1;
-        }
-        
-        if (!seriesMap.has(normalizedTopic)) {
-            seriesMap.set(normalizedTopic, {
-                originalTopic: item.topic,
-                episodes: []
+        if (!topicMap.has(normalizedTopic)) {
+            topicMap.set(normalizedTopic, {
+                originalTopic: cleanedTopic,
+                items: []
             });
         }
         
-        seriesMap.get(normalizedTopic).episodes.push({
-            ...item,
-            parsedSeason: parsedSeason,
-            parsedEpisode: parseResult.episode,
-            parseConfidence: parseResult.confidence,
-            parsePattern: parseResult.pattern
-        });
+        topicMap.get(normalizedTopic).items.push(item);
     });
     
     const displayList = [];
     
-    // Process series (groups with 2+ episodes)
-    seriesMap.forEach((seriesData, normalizedTopic) => {
-        const episodeCount = seriesData.episodes.length;
+    // Process series (groups with 2+ items for the same topic)
+    topicMap.forEach((groupData, normalizedTopic) => {
+        const groupItems = groupData.items;
         
-        if (episodeCount >= 2) {
-            // Sort episodes: Season first, then Episode, then Timestamp
-            seriesData.episodes.sort((a, b) => {
-                if (a.parsedSeason && b.parsedSeason) {
-                    if (a.parsedSeason !== b.parsedSeason) {
-                        return a.parsedSeason - b.parsedSeason;
-                    }
-                }
-                if (a.parsedEpisode && b.parsedEpisode) {
-                    if (a.parsedEpisode !== b.parsedEpisode) {
-                        return a.parsedEpisode - b.parsedEpisode;
-                    }
-                }
-                return b.timestamp - a.timestamp;
-            });
-            
+        if (groupItems.length >= 2) {
             displayList.push({
                 type: 'series',
-                title: seriesData.originalTopic,
-                episodes: seriesData.episodes
+                title: groupData.originalTopic,
+                episodes: groupItems
             });
         } else {
-            // Only 1 episode -> standalone
-            standaloneVideos.push(...seriesData.episodes);
+            // Only 1 item -> standalone
+            standaloneVideos.push(...groupItems);
         }
     });
     
@@ -2499,8 +3135,8 @@ function renderDisplayItems(items) {
         if (item.type === 'series') {
             const seriesCard = createSeriesCard(item.title, item.episodes);
             if (videoGrid) videoGrid.appendChild(seriesCard);
-        } else {
-            const card = createVideoCard(item.data, currentOffset + index);
+        } else if (item.type === 'video') {
+            const card = createVideoCard(item.data, index);
             if (videoGrid) videoGrid.appendChild(card);
         }
     });
@@ -2517,229 +3153,380 @@ async function openSeriesDetail(seriesName, episodes) {
     navigateToPage('seriesDetail');
     
     // Setze Titel
-    document.getElementById('seriesDetailTitle').innerHTML = `<i class="fas fa-tv"></i> ${seriesName}`;
+    const titleEl = document.getElementById('seriesDetailTitle');
+    if (titleEl) titleEl.innerHTML = `<i class="fas fa-tv"></i> ${seriesName}`;
     
-    // REGEL 5: TMDB-Abfrage mit sauberem Topic (nicht mit Episode-Titel!)
-    let tmdbSeries = null;
-    let tmdbDetails = null;
-    
-    try {
-        console.log('[openSeriesDetail] TMDB-Suche für:', seriesName);
-        tmdbSeries = await searchTMDBSeries(seriesName);
-        
-        if (tmdbSeries && tmdbSeries.id) {
-            console.log('[openSeriesDetail] ✓ TMDB Serie gefunden:', tmdbSeries.name, '(ID:', tmdbSeries.id + ')');
-            tmdbDetails = await getTMDBSeriesDetails(tmdbSeries.id);
-        } else {
-            console.log('[openSeriesDetail] ✗ TMDB Serie nicht gefunden');
-        }
-    } catch (e) {
-        console.error('[openSeriesDetail] TMDB-Fehler:', e);
-    }
-    
-    // Parse Episoden (falls noch nicht geparsed)
-    const parsedEpisodes = episodes.map(ep => {
-        // Wenn schon geparsed (von displaySeriesGrouped), verwende diese Daten
-        if (ep.parsedSeason !== undefined && ep.parsedEpisode !== undefined) {
-            return ep;
-        }
-        
-        // Sonst: Parse jetzt
-        const parser = new EpisodeParser(ep.title, ep.description);
-        const parseResult = parser.parse();
-        
-        return {
-            ...ep,
-            parsedSeason: parseResult.season || 1,
-            parsedEpisode: parseResult.episode || 0,
-            parseConfidence: parseResult.confidence,
-            parsePattern: parseResult.pattern
-        };
-    });
-    
-    // REGEL 4: Gruppiere nach Staffel
-    const seasonMap = new Map();
-    parsedEpisodes.forEach(ep => {
-        const season = ep.parsedSeason || 1;
-        if (!seasonMap.has(season)) {
-            seasonMap.set(season, []);
-        }
-        seasonMap.get(season).push(ep);
-    });
-    
-    // REGEL 4: Sortiere Staffeln und Episoden
-    const sortedSeasons = Array.from(seasonMap.keys()).sort((a, b) => a - b);
-    
-    sortedSeasons.forEach(season => {
-        const eps = seasonMap.get(season);
-        
-        // Sortiere Episoden innerhalb der Staffel
-        eps.sort((a, b) => {
-            // Konvertiere zu Zahlen und behandle undefined/null/0
-            const episodeA = parseInt(a.parsedEpisode, 10) || 0;
-            const episodeB = parseInt(b.parsedEpisode, 10) || 0;
-            
-            // Wenn beide Episoden eine gültige Nummer haben (>0): sortiere nach Nummer
-            if (episodeA > 0 && episodeB > 0) {
-                return episodeA - episodeB;
-            }
-            
-            // REGEL 4: Fallback auf Datum (timestamp), neueste zuerst
-            // (Bei Serien wie "Tatort" ohne klare Episodennummern)
-            const timestampA = parseInt(a.timestamp, 10) || 0;
-            const timestampB = parseInt(b.timestamp, 10) || 0;
-            return timestampB - timestampA;
-        });
-        
-        console.log(`[openSeriesDetail] Staffel ${season}: ${eps.length} Episoden sortiert`);
-        // Debug: Zeige die sortierten Episodennummern
-        console.log(`  → Sortierte Reihenfolge: ${eps.map(e => `E${e.parsedEpisode || '?'}`).join(', ')}`);
-    });
-    
-    // Zeige Serien-Info
-    const seriesInfo = document.getElementById('seriesInfo');
-    const firstEpisode = episodes[0];
-    
-    // Verwende TMDB-Beschreibung wenn verfügbar
-    let bestDescription = firstEpisode.description || firstEpisode.topic || 'Keine Beschreibung verfügbar';
-    
-    if (tmdbDetails && tmdbDetails.overview) {
-        bestDescription = tmdbDetails.overview;
-        console.log('[openSeriesDetail] ✓ Verwende TMDB-Beschreibung');
-    } else {
-        // Finde beste Beschreibung aus Episoden (ohne Episode-spezifische Begriffe)
-        episodes.forEach(ep => {
-            if (ep.description && ep.description.length > bestDescription.length) {
-                const descLower = ep.description.toLowerCase();
-                // Vermeide Episode-spezifische Beschreibungen
-                if (!descLower.includes('folge') && 
-                    !descLower.includes('episode') && 
-                    !descLower.includes('teil') &&
-                    !descLower.match(/\bs\d+e\d+/)) {
-                    bestDescription = ep.description;
-                }
-            }
-        });
-    }
-    
-    const totalSeasons = sortedSeasons.length;
-    
-    // Generiere Poster-ID
-    const posterId = `series_poster_${btoa(seriesName).substring(0, 16)}`;
-    
-    // REGEL 5: TMDB-Poster wenn verfügbar
-    let posterHTML = `<i class="fas fa-tv" style="opacity: 0.3;"></i>`;
-    let posterStyle = '';
-    
-    if (tmdbDetails && tmdbDetails.poster_path) {
-        const posterURL = getTMDBPosterURL(tmdbDetails.poster_path);
-        posterStyle = `style="background-image: url(${posterURL}); background-size: cover; background-position: center;"`;
-        posterHTML = '';
-        console.log('[openSeriesDetail] ✓ Verwende TMDB-Poster');
-    }
-    // Set TMDB backdrop as background of series-info-container if available
-    if (tmdbDetails && tmdbDetails.backdrop_path) {
-        const backdropURL = getTMDBBackdropURL(tmdbDetails.backdrop_path);
-        seriesInfo.style.backgroundImage = `linear-gradient(to right, rgba(9, 9, 11, 0.95) 30%, rgba(9, 9, 11, 0.45) 100%), url(${backdropURL})`;
-        seriesInfo.style.backgroundSize = 'cover';
-        seriesInfo.style.backgroundPosition = 'center';
-    } else {
-        seriesInfo.style.backgroundImage = '';
-        seriesInfo.style.backgroundSize = '';
-        seriesInfo.style.backgroundPosition = '';
-    }
-    
-    // Check subscription status
-    const isSubbed = getAbos().some(a => a.term.toLowerCase() === seriesName.toLowerCase());
-
-    // Baue Serien-Info HTML
-    seriesInfo.innerHTML = `
-        <div class="series-info-poster" id="${posterId}" ${posterStyle}>
-            ${posterHTML}
-        </div>
-        <div class="series-info-details">
-            <h3>${seriesName}</h3>
-            <div class="series-info-meta">
-                <span><i class="fas fa-tv"></i> ${firstEpisode.channel}</span>
-                <span><i class="fas fa-layer-group"></i> ${totalSeasons} ${totalSeasons === 1 ? 'Staffel' : 'Staffeln'}</span>
-                <span><i class="fas fa-list"></i> ${episodes.length} Folgen</span>
-                ${tmdbDetails && tmdbDetails.first_air_date ? `<span><i class="fas fa-calendar"></i> ${tmdbDetails.first_air_date.split('-')[0]}</span>` : ''}
-                ${tmdbDetails && tmdbDetails.vote_average ? `<span><i class="fas fa-star" style="color:#eab308;"></i> ${tmdbDetails.vote_average.toFixed(1)}/10</span>` : ''}
-            </div>
-            <div class="series-info-description">
-                ${bestDescription.length > 400 ? bestDescription.substring(0, 400) + '...' : bestDescription}
-            </div>
-            <div style="margin-top: 1rem;">
-                <button id="seriesDetailSubBtn" class="action-btn${isSubbed ? ' btn-subscribed' : ''}" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 8px;">
-                    <i class="fas ${isSubbed ? 'fa-bell-slash' : 'fa-bell'}"></i> ${isSubbed ? 'Abonniert' : 'Serie abonnieren'}
-                </button>
-            </div>
-        </div>
-    `;
-
-    const subBtn = document.getElementById('seriesDetailSubBtn');
-    if (subBtn) {
-        subBtn.addEventListener('click', () => {
-            const abos = getAbos();
-            const idx = abos.findIndex(a => a.term.toLowerCase() === seriesName.toLowerCase());
-            if (idx >= 0) {
-                abos.splice(idx, 1);
-                subBtn.classList.remove('btn-subscribed');
-                subBtn.innerHTML = '<i class="fas fa-bell"></i> Serie abonnieren';
-            } else {
-                abos.push({ term: seriesName, addedAt: Date.now() });
-                subBtn.classList.add('btn-subscribed');
-                subBtn.innerHTML = '<i class="fas fa-bell-slash"></i> Abonniert';
-            }
-            saveAbos(abos);
-        });
-    }
-    
-    // Lade Video-Thumbnail falls kein TMDB-Poster vorhanden (deaktiviert für bessere Performance)
-    // CSS Fallback Gradient wird verwendet
-    
-    // Zeige Episoden gruppiert nach Staffel
-    const episodesGrid = document.getElementById('seriesEpisodesGrid');
-    episodesGrid.innerHTML = '';
-    
-    sortedSeasons.forEach(seasonNum => {
-        const seasonEpisodes = seasonMap.get(seasonNum);
-        
-        // Staffel-Header
-        const seasonHeader = document.createElement('div');
-        seasonHeader.style.cssText = 'grid-column: 1/-1; margin: 2rem 0 1rem 0; padding: 1rem; background: var(--surface); border-radius: 8px; border: 1px solid var(--border-color);';
-        seasonHeader.innerHTML = `
-            <h3 style="margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
-                <i class="fas fa-layer-group"></i>
-                Staffel ${seasonNum}
-                <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: normal;">(${seasonEpisodes.length} Folgen)</span>
-            </h3>
-        `;
-        episodesGrid.appendChild(seasonHeader);
-        
-        // Episoden der Staffel
-        seasonEpisodes.forEach((episode, idx) => {
-            const card = createVideoCard(episode, idx);
-            episodesGrid.appendChild(card);
-        });
-    });
-    
-    // Setup Back-Button
+    // Setup Back-Button immediately so user can always navigate back
     const backBtn = document.getElementById('backFromSeries');
     if (backBtn) {
-        backBtn.addEventListener('click', (e) => {
+        backBtn.onclick = (e) => {
+            e.preventDefault();
             try {
-                window._haptic?.tick?.();
+                if (window._haptic) window._haptic.tick();
                 const target = (window._seriesPreviousPage && window._seriesPreviousPage !== 'seriesDetail') ? window._seriesPreviousPage : 'home';
                 navigateToPage(target);
             } catch (err) {
                 console.error('Back button error:', err);
                 navigateToPage('home');
             }
-        });
+        };
     }
     
-    console.log('[openSeriesDetail] ✓ Detail-Seite geladen');
+    const episodesGrid = document.getElementById('seriesEpisodesGrid');
+    const seriesInfo = document.getElementById('seriesInfo');
+    if (episodesGrid) episodesGrid.innerHTML = '';
+    
+    try {
+        const firstEpisode = (episodes && episodes.length > 0) ? episodes[0] : {};
+        
+        // Fetch ALL available episodes for this series topic from MediathekView
+        let allEpisodes = [...(episodes || [])];
+        try {
+            const payload = {
+                queries: [
+                    { fields: ["topic"], query: seriesName }
+                ],
+                sortBy: "timestamp",
+                sortOrder: "desc",
+                future: true,
+                offset: 0,
+                size: 200
+            };
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify(payload)
+            });
+            if (response.ok) {
+                const data = await response.json();
+                let fetched = data.result?.results || [];
+                if (getActiveProfile().isKids) {
+                    fetched = filterKidsSafe(fetched);
+                }
+                if (fetched.length > 0) {
+                    const seen = new Set();
+                    const merged = [];
+                    [...fetched, ...(episodes || [])].forEach(ep => {
+                        const key = getVideoProgressKey(ep);
+                        if (key && !seen.has(key)) {
+                            seen.add(key);
+                            merged.push(ep);
+                        }
+                    });
+                    allEpisodes = merged;
+                    console.log(`[openSeriesDetail] Vollständige Episodenliste geladen: ${allEpisodes.length} Episoden`);
+                }
+            }
+        } catch (e) {
+            console.warn('[openSeriesDetail] Fehler beim Nachladen aller Episoden:', e);
+        }
+        episodes = allEpisodes;
+        
+        // REGEL 5: TMDB-Abfrage mit sauberem Topic (nicht mit Episode-Titel!)
+        let tmdbSeries = null;
+        let tmdbDetails = null;
+        
+        try {
+            const bestSearchName = findBestSeriesSearchQuery(seriesName, episodes);
+            console.log('[openSeriesDetail] TMDB-Suche für:', bestSearchName);
+            tmdbSeries = await searchTMDBSeries(bestSearchName, episodes[0]);
+            
+            if (tmdbSeries && tmdbSeries.id) {
+                console.log('[openSeriesDetail] ✓ TMDB Serie gefunden:', tmdbSeries.name, '(ID:', tmdbSeries.id + ')');
+                tmdbDetails = await getTMDBSeriesDetails(tmdbSeries.id);
+            } else {
+                console.log('[openSeriesDetail] ✗ TMDB Serie nicht gefunden');
+            }
+        } catch (e) {
+            console.error('[openSeriesDetail] TMDB-Fehler:', e);
+        }
+        
+        // ── Helper: detect Extras / Clips / BTS / Rückblicke ──
+        function isSeriesExtra(ep) {
+            const title = (ep.title || '').toLowerCase();
+            const desc = (ep.description || '').toLowerCase();
+            const duration = parseInt(ep.duration || '0', 10);
+            
+            const extraKeywords = [
+                'rückblick', 'making of', 'making-of', 'behind the scenes', 'bts',
+                'trailer', 'teaser', 'clip', 'vorschau', 'spoiler', 'danke für eure',
+                'interview', 'outtakes', 'bloopers', 'bonus', 'kurzclip', 'musikvideo',
+                'song', 'best of', 'hinter den kulissen'
+            ];
+            
+            if (extraKeywords.some(kw => title.includes(kw) || desc.includes(kw))) {
+                return true;
+            }
+            if (duration > 0 && duration <= 240) {
+                return true;
+            }
+            return false;
+        }
+
+        // 1. Separate full episodes from Extras & Clips
+        const fullEpisodesList = [];
+        const extrasList = [];
+        
+        episodes.forEach(ep => {
+            if (isSeriesExtra(ep)) {
+                extrasList.push(ep);
+            } else {
+                fullEpisodesList.push(ep);
+            }
+        });
+
+        // 2. Identify Primary / Main Channel (the channel with the most full episodes)
+        const channelCounts = {};
+        fullEpisodesList.forEach(ep => {
+            const ch = ep.channel || 'DEFAULT';
+            channelCounts[ch] = (channelCounts[ch] || 0) + 1;
+        });
+        let primaryChannel = firstEpisode.channel || 'DEFAULT';
+        let maxCount = -1;
+        Object.entries(channelCounts).forEach(([ch, count]) => {
+            if (count > maxCount) {
+                maxCount = count;
+                primaryChannel = ch;
+            }
+        });
+        console.log(`[openSeriesDetail] Hauptsender: ${primaryChannel} (${maxCount} Episoden)`);
+
+        // 3. Parse & Deduplicate Full Episodes (prefer non-Hörfassung over Hörfassung, prefer primary channel)
+        const episodeMap = new Map();
+        
+        fullEpisodesList.forEach(ep => {
+            const parser = new EpisodeParser(ep.title, ep.description);
+            const parseResult = parser.parse();
+            const s = parseResult.season || 1;
+            const e = parseResult.episode || 0;
+            const cleanT = cleanEpisodeTitle(ep.title).toLowerCase();
+            const epKey = (e > 0) ? `s${s}_e${e}` : `t_${cleanT}`;
+            const isAD = isAudioDescription(ep);
+            
+            const existing = episodeMap.get(epKey);
+            if (!existing) {
+                episodeMap.set(epKey, {
+                    ...ep,
+                    title: cleanEpisodeTitle(ep.title),
+                    parsedSeason: s,
+                    parsedEpisode: e,
+                    isAD: isAD,
+                    parseConfidence: parseResult.confidence,
+                    parsePattern: parseResult.pattern
+                });
+            } else {
+                // If existing is Hörfassung and incoming is regular non-Hörfassung -> replace with regular!
+                if (existing.isAD && !isAD) {
+                    episodeMap.set(epKey, {
+                        ...ep,
+                        title: cleanEpisodeTitle(ep.title),
+                        parsedSeason: s,
+                        parsedEpisode: e,
+                        isAD: isAD,
+                        parseConfidence: parseResult.confidence,
+                        parsePattern: parseResult.pattern
+                    });
+                } else if (existing.isAD === isAD && ep.channel === primaryChannel && existing.channel !== primaryChannel) {
+                    // Prefer primary channel
+                    episodeMap.set(epKey, {
+                        ...ep,
+                        title: cleanEpisodeTitle(ep.title),
+                        parsedSeason: s,
+                        parsedEpisode: e,
+                        isAD: isAD,
+                        parseConfidence: parseResult.confidence,
+                        parsePattern: parseResult.pattern
+                    });
+                }
+            }
+        });
+
+        // Fallback: If deduplication resulted in empty list, use all full episodes
+        let parsedEpisodes = Array.from(episodeMap.values());
+        if (parsedEpisodes.length === 0 && fullEpisodesList.length > 0) {
+            parsedEpisodes = fullEpisodesList.map(ep => {
+                const parser = new EpisodeParser(ep.title, ep.description);
+                const parseResult = parser.parse();
+                return { ...ep, title: cleanEpisodeTitle(ep.title), parsedSeason: parseResult.season || 1, parsedEpisode: parseResult.episode || 0 };
+            });
+        }
+        if (parsedEpisodes.length === 0 && episodes.length > 0) {
+            parsedEpisodes = episodes.map(ep => ({ ...ep, title: cleanEpisodeTitle(ep.title), parsedSeason: 1, parsedEpisode: 0 }));
+        }
+
+        // 4. Group full episodes by season
+        const seasonMap = new Map();
+        parsedEpisodes.forEach(ep => {
+            const season = ep.parsedSeason || 1;
+            if (!seasonMap.has(season)) {
+                seasonMap.set(season, []);
+            }
+            seasonMap.get(season).push(ep);
+        });
+        
+        // Sort seasons ascending (1 -> 2 -> 3...)
+        const sortedSeasons = Array.from(seasonMap.keys()).sort((a, b) => a - b);
+        
+        sortedSeasons.forEach(season => {
+            const eps = seasonMap.get(season);
+            
+            // Sort episodes ascending (Folge 1 -> Folge 2 -> Folge 3... -> Folge 26)
+            eps.sort((a, b) => {
+                const epA = parseInt(a.parsedEpisode, 10) || 0;
+                const epB = parseInt(b.parsedEpisode, 10) || 0;
+                
+                if (epA > 0 && epB > 0) {
+                    return epA - epB;
+                }
+                if (epA > 0) return -1;
+                if (epB > 0) return 1;
+                
+                // Fallback to timestamp (oldest first for chronological order)
+                const timeA = parseInt(a.timestamp, 10) || 0;
+                const timeB = parseInt(b.timestamp, 10) || 0;
+                return timeA - timeB;
+            });
+            
+            console.log(`[openSeriesDetail] Staffel ${season}: ${eps.length} Episoden aufsteigend sortiert`);
+        });
+        
+        // Verwende TMDB-Beschreibung wenn verfügbar
+        let bestDescription = '';
+        if (tmdbDetails && tmdbDetails.overview && tmdbDetails.overview.trim().length > 10) {
+            bestDescription = tmdbDetails.overview.trim();
+        } else if (tmdbSeries && tmdbSeries.overview && tmdbSeries.overview.trim().length > 10) {
+            bestDescription = tmdbSeries.overview.trim();
+        } else {
+            bestDescription = `Alle verfügbaren Staffeln und Folgen der Serie „${seriesName}“ (${primaryChannel}). Wähle unten eine Episode aus der Staffelübersicht, um sie abzuspielen.`;
+        }
+        
+        const totalSeasons = Math.max(1, sortedSeasons.length);
+        const posterId = `series_poster_${btoa(encodeURIComponent(seriesName)).substring(0, 16)}`;
+        
+        let posterHTML = `<i class="fas fa-tv" style="opacity: 0.3;"></i>`;
+        let posterStyle = '';
+        
+        if (tmdbDetails && tmdbDetails.poster_path) {
+            const posterURL = getTMDBPosterURL(tmdbDetails.poster_path);
+            posterStyle = `style="background-image: url(${posterURL}); background-size: cover; background-position: center;"`;
+            posterHTML = '';
+        }
+        if (seriesInfo) {
+            if (tmdbDetails && tmdbDetails.backdrop_path) {
+                const backdropURL = getTMDBBackdropURL(tmdbDetails.backdrop_path);
+                seriesInfo.style.backgroundImage = `linear-gradient(to right, rgba(9, 9, 11, 0.95) 30%, rgba(9, 9, 11, 0.45) 100%), url(${backdropURL})`;
+                seriesInfo.style.backgroundSize = 'cover';
+                seriesInfo.style.backgroundPosition = 'center';
+            } else {
+                seriesInfo.style.backgroundImage = '';
+                seriesInfo.style.backgroundSize = '';
+                seriesInfo.style.backgroundPosition = '';
+            }
+            
+            // Check subscription status
+            const isSubbed = getAbos().some(a => a.term.toLowerCase() === seriesName.toLowerCase());
+
+            // Baue Serien-Info HTML
+            seriesInfo.innerHTML = `
+                <div class="series-info-poster" id="${posterId}" ${posterStyle}>
+                    ${posterHTML}
+                </div>
+                <div class="series-info-details">
+                    <h3>${seriesName}</h3>
+                    <div class="series-info-meta">
+                        <span><i class="fas fa-tv"></i> ${primaryChannel}</span>
+                        <span><i class="fas fa-layer-group"></i> ${totalSeasons} ${totalSeasons === 1 ? 'Staffel' : 'Staffeln'}</span>
+                        <span><i class="fas fa-list"></i> ${parsedEpisodes.length} Folgen</span>
+                        ${extrasList.length > 0 ? `<span><i class="fas fa-film"></i> ${extrasList.length} Extras</span>` : ''}
+                        ${tmdbDetails && tmdbDetails.first_air_date ? `<span><i class="fas fa-calendar"></i> ${tmdbDetails.first_air_date.split('-')[0]}</span>` : ''}
+                        ${tmdbDetails && tmdbDetails.vote_average ? `<span><i class="fas fa-star" style="color:#eab308;"></i> ${tmdbDetails.vote_average.toFixed(1)}/10</span>` : ''}
+                    </div>
+                    <div class="series-info-description">
+                        ${bestDescription}
+                    </div>
+                    <div style="margin-top: 1rem;">
+                        <button id="seriesDetailSubBtn" class="action-btn${isSubbed ? ' btn-subscribed' : ''}" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 8px;">
+                            <i class="fas ${isSubbed ? 'fa-bell-slash' : 'fa-bell'}"></i> ${isSubbed ? 'Abonniert' : 'Serie abonnieren'}
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            const subBtn = document.getElementById('seriesDetailSubBtn');
+            if (subBtn) {
+                subBtn.onclick = () => {
+                    const abos = getAbos();
+                    const idx = abos.findIndex(a => a.term.toLowerCase() === seriesName.toLowerCase());
+                    if (idx >= 0) {
+                        abos.splice(idx, 1);
+                        subBtn.classList.remove('btn-subscribed');
+                        subBtn.innerHTML = '<i class="fas fa-bell"></i> Serie abonnieren';
+                    } else {
+                        abos.push({ term: seriesName, addedAt: Date.now() });
+                        subBtn.classList.add('btn-subscribed');
+                        subBtn.innerHTML = '<i class="fas fa-bell-slash"></i> Abonniert';
+                    }
+                    saveAbos(abos);
+                };
+            }
+        }
+        
+        // Zeige Episoden gruppiert nach Staffel (aufsteigend)
+        if (episodesGrid) {
+            episodesGrid.innerHTML = '';
+            
+            sortedSeasons.forEach(seasonNum => {
+                const seasonEpisodes = seasonMap.get(seasonNum) || [];
+                
+                // Staffel-Header
+                const seasonHeader = document.createElement('div');
+                seasonHeader.style.cssText = 'grid-column: 1/-1; margin: 2rem 0 1rem 0; padding: 1rem; background: var(--surface); border-radius: 8px; border: 1px solid var(--border-color);';
+                seasonHeader.innerHTML = `
+                    <h3 style="margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fas fa-layer-group"></i>
+                        Staffel ${seasonNum}
+                        <span style="color: var(--text-secondary); font-size: 0.9rem; font-weight: normal;">(${seasonEpisodes.length} Folgen)</span>
+                    </h3>
+                `;
+                episodesGrid.appendChild(seasonHeader);
+                
+                // Episoden der Staffel
+                seasonEpisodes.forEach((episode, idx) => {
+                    const card = createVideoCard(episode, idx);
+                    episodesGrid.appendChild(card);
+                });
+            });
+
+            // Zeige Extras / Clips / Bonus ganz unten
+            if (extrasList.length > 0) {
+                const extrasHeader = document.createElement('div');
+                extrasHeader.style.cssText = 'grid-column: 1/-1; margin: 2.5rem 0 1rem 0; padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px dashed var(--border-color);';
+                extrasHeader.innerHTML = `
+                    <h3 style="margin: 0; color: var(--text-secondary); display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fas fa-film"></i>
+                        Extras, Clips & Bonus
+                        <span style="color: var(--text-secondary); font-size: 0.85rem; font-weight: normal;">(${extrasList.length} Clips)</span>
+                    </h3>
+                `;
+                episodesGrid.appendChild(extrasHeader);
+
+                extrasList.forEach((extra, idx) => {
+                    const card = createVideoCard(extra, idx);
+                    episodesGrid.appendChild(card);
+                });
+            }
+        }
+        
+        console.log('[openSeriesDetail] ✓ Detail-Seite erfolgreich geladen');
+    } catch (fatalErr) {
+        console.error('[openSeriesDetail] Schwerer Fehler beim Rendern:', fatalErr);
+        if (episodesGrid && episodesGrid.children.length === 0) {
+            (episodes || []).forEach((ep, idx) => {
+                const card = createVideoCard(ep, idx);
+                episodesGrid.appendChild(card);
+            });
+        }
+    }
 }
 
 // ============================================================================
@@ -2757,35 +3544,92 @@ function createSeriesCard(seriesName, episodes) {
     const card = document.createElement('div');
     card.className = 'series-card';
 
-    const firstEpisode = episodes[0];
+    const firstEpisode = episodes[0] || {};
     const gradient = getChannelGradient(firstEpisode.channel);
     const thumbnailId = `thumb-${++thumbIdCounter}`;
+    const countBadgeId = `scount_b_${thumbIdCounter}`;
+    const countMetaId = `scount_m_${thumbIdCounter}`;
 
     card.innerHTML = `
         <div class="series-card-thumbnail" id="${thumbnailId}" style="background: ${gradient};">
-            <span class="sender-logo thumb-overlay-logo">${firstEpisode.channel}</span>
-            <div class="duration-badge">${episodes.length} Folgen</div>
+            <span class="sender-logo thumb-overlay-logo">${firstEpisode.channel || ''}</span>
+            <div class="duration-badge" style="display:inline-flex; align-items:center; gap:4px;">
+                <i class="fas fa-layer-group"></i> <span id="${countBadgeId}">${episodes.length} Folgen</span>
+            </div>
         </div>
         <div class="series-card-content">
             <h3 class="series-card-title">${seriesName}</h3>
             <div class="series-card-meta">
-                <span class="channel-badge">${firstEpisode.channel}</span>
-                <span>${episodes.length} Folgen</span>
+                <span class="channel-badge">${firstEpisode.channel || ''}</span>
+                <span class="channel-badge" style="background: rgba(99, 102, 241, 0.18); color: #818cf8; font-size: 0.72rem;"><i class="fas fa-tv"></i> Serie</span>
+                <span id="${countMetaId}">${episodes.length} Folgen</span>
             </div>
         </div>
     `;
 
     card.addEventListener('click', () => openSeriesDetail(seriesName, episodes));
 
-    // Queue real thumbnail capture
-    const videoUrl = firstEpisode.url_video_low || firstEpisode.url_video;
-    if (videoUrl) {
-        const ck = simpleHash('series_' + videoUrl);
-        setTimeout(() => {
-            const el = document.getElementById(thumbnailId);
-            if (el) queueRealThumbnail(videoUrl, ck, el, gradient);
-        }, 120);
-    }
+    // Fast background query to get the true total episode count across all broadcasts
+    (async () => {
+        try {
+            const countPayload = {
+                queries: [{ fields: ["topic"], query: seriesName }],
+                future: true,
+                size: 0
+            };
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify(countPayload)
+            });
+            if (res.ok) {
+                const countData = await res.json();
+                const total = countData.result?.total || 0;
+                if (total > 0) {
+                    const badgeEl = document.getElementById(countBadgeId);
+                    const metaEl = document.getElementById(countMetaId);
+                    if (badgeEl) badgeEl.textContent = `${total} Folgen`;
+                    if (metaEl) metaEl.textContent = `${total} Folgen`;
+                }
+            }
+        } catch(e) {}
+    })();
+
+    // Async TMDB poster preview for series card
+    (async () => {
+        try {
+            const bestSearchName = findBestSeriesSearchQuery(seriesName, episodes);
+            const tmdb = await searchTMDBSeries(bestSearchName, firstEpisode);
+            if (tmdb && (tmdb.backdrop_path || tmdb.poster_path)) {
+                const imgPath = tmdb.backdrop_path || tmdb.poster_path;
+                const imgUrl = getTMDBPosterURL(imgPath);
+                const el = document.getElementById(thumbnailId);
+                if (el) {
+                    el.style.backgroundImage = `url(${imgUrl})`;
+                    el.style.backgroundSize = 'cover';
+                    el.style.backgroundPosition = 'center';
+                }
+            } else {
+                const videoUrl = firstEpisode.url_video_low || firstEpisode.url_video;
+                if (videoUrl) {
+                    const ck = simpleHash('series_' + videoUrl);
+                    setTimeout(() => {
+                        const el = document.getElementById(thumbnailId);
+                        if (el) queueRealThumbnail(videoUrl, ck, el, gradient);
+                    }, 120);
+                }
+            }
+        } catch(e) {
+            const videoUrl = firstEpisode.url_video_low || firstEpisode.url_video;
+            if (videoUrl) {
+                const ck = simpleHash('series_' + videoUrl);
+                setTimeout(() => {
+                    const el = document.getElementById(thumbnailId);
+                    if (el) queueRealThumbnail(videoUrl, ck, el, gradient);
+                }, 120);
+            }
+        }
+    })();
 
     return card;
 }
@@ -2831,9 +3675,10 @@ function createVideoCard(item, index) {
             ${progressHTML}
         </div>
         <div class="video-card-content">
-            <h3 class="video-card-title">${item.title}</h3>
+            <h3 class="video-card-title">${cleanEpisodeTitle(item.title)}</h3>
             <div class="video-card-meta">
                 <span class="channel-badge">${item.channel}</span>
+                ${isAudioDescription(item) ? '<span class="channel-badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 0.7rem;" title="Hörfassung / Audiodeskription">AD</span>' : ''}
                 <span class="video-date">${dateText}</span>
             </div>
         </div>
@@ -2876,7 +3721,13 @@ function createVideoCard(item, index) {
             e.stopPropagation();
             toggleWatchlist(item, wlBtn);
         }, { passive: false });
-        wlBtn.addEventListener('click', (e) => { e.stopPropagation(); }); // desktop fallback, toggle already done on touchend
+        wlBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // On desktop there's no touchend, so trigger toggle here
+            if (!wlBtn._touchTriggered) toggleWatchlist(item, wlBtn);
+            wlBtn._touchTriggered = false;
+        });
+        wlBtn.addEventListener('touchstart', () => { wlBtn._touchTriggered = true; }, { passive: true });
     }
 
     const wlaterBtn = card.querySelector('.watchlater-btn');
@@ -2887,7 +3738,13 @@ function createVideoCard(item, index) {
             e.stopPropagation();
             toggleWatchLater(item, wlaterBtn);
         }, { passive: false });
-        wlaterBtn.addEventListener('click', (e) => { e.stopPropagation(); }); // desktop fallback
+        wlaterBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // On desktop there's no touchend, so trigger toggle here
+            if (!wlaterBtn._touchTriggered) toggleWatchLater(item, wlaterBtn);
+            wlaterBtn._touchTriggered = false;
+        });
+        wlaterBtn.addEventListener('touchstart', () => { wlaterBtn._touchTriggered = true; }, { passive: true });
     }
 
     // Queue real thumbnail with stagger so cards don't all fire at once
@@ -2953,7 +3810,7 @@ function playVideo(item) {
         const dateEl = document.getElementById('videoDate');
         const descEl = document.getElementById('videoDescription');
         
-        if (titleEl) titleEl.textContent = item.title;
+        if (titleEl) titleEl.textContent = cleanEpisodeTitle(item.title);
         if (channelEl) channelEl.textContent = item.channel;
         if (durationEl) durationEl.textContent = `${Math.round(item.duration / 60)} Min`;
         if (dateEl) dateEl.textContent = formatDate(new Date(item.timestamp * 1000));
@@ -3089,6 +3946,33 @@ function playVideo(item) {
         // Store current video URL for share button
         window.currentVideoUrl = videoUrl;
         window.currentVideoTitle = item.title;
+
+        // Setup "Zur Serie" Button & clickable Topic Badge
+        const seriesTopic = (item.topic && item.topic.trim()) || '';
+        const topicBadge = document.getElementById('videoTopicBadge');
+        const topicName = document.getElementById('videoTopicName');
+        const modalSeriesBtn = document.getElementById('modalSeriesBtn');
+
+        if (seriesTopic && seriesTopic.toLowerCase() !== (item.title || '').toLowerCase()) {
+            if (topicBadge && topicName) {
+                topicName.textContent = seriesTopic;
+                topicBadge.style.display = 'inline-flex';
+                topicBadge.onclick = () => {
+                    closeVideoModal();
+                    openSeriesDetail(seriesTopic, [item]);
+                };
+            }
+            if (modalSeriesBtn) {
+                modalSeriesBtn.style.display = 'inline-flex';
+                modalSeriesBtn.onclick = () => {
+                    closeVideoModal();
+                    openSeriesDetail(seriesTopic, [item]);
+                };
+            }
+        } else {
+            if (topicBadge) topicBadge.style.display = 'none';
+            if (modalSeriesBtn) modalSeriesBtn.style.display = 'none';
+        }
 
         // Show/hide trailer button
         const trailerBtn = document.getElementById('trailerBtn');
@@ -3442,6 +4326,13 @@ function applyFilters() {
         });
         console.log('After duration filter:', filtered.length, '(min duration:', minDuration, 'min)');
     }
+
+    // Hörfassungen / AD filter
+    const hideAD = document.getElementById('hideAudioDescriptionToggle')?.checked;
+    if (hideAD) {
+        filtered = filtered.filter(item => !isAudioDescription(item));
+        console.log('After hideAD filter:', filtered.length);
+    }
     
     // Sorting
     if (sortBy === 'duration') {
@@ -3628,7 +4519,7 @@ function navigateToPage(page) {
             if (recentlyWatched) recentlyWatched.style.display = 'none';
             showLoading(true);
             // Title will be set by performSearch
-        } else if (currentResults && currentResults.length > 0) {
+        } else if (searchInput && searchInput.value.trim() && currentQuery && currentResults && currentResults.length > 0) {
             if (recentlyWatched) recentlyWatched.style.display = 'block';
             displayResults();
             loadRecentlyWatched();
@@ -3717,7 +4608,7 @@ window.navigateToPage = navigateToPage;
 
 // Load Full History Page
 function loadFullHistoryPage() {
-    const recent = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
+    const recent = getRecentlyWatched();
     const historyGrid = document.getElementById('historyGrid');
     
     if (!historyGrid) return;
@@ -3738,10 +4629,10 @@ function loadFullHistoryPage() {
         delBtn.title = 'Aus Verlauf entfernen';
         delBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            let hist = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
+            let hist = getRecentlyWatched();
             // Match by url or title
             hist = hist.filter(h => !(h.title === item.title && (h.url_video || '') === (item.url_video || '')));
-            localStorage.setItem('recentlyWatched', JSON.stringify(hist));
+            saveRecentlyWatched(hist);
             card.style.transition = 'opacity 0.25s, transform 0.25s';
             card.style.opacity = '0';
             card.style.transform = 'scale(0.9)';
@@ -3759,7 +4650,7 @@ function loadFullHistoryPage() {
 
 // Filter History Page
 function filterHistoryPage(query) {
-    const recent = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
+    const recent = getRecentlyWatched();
     const historyGrid = document.getElementById('historyGrid');
     
     if (!historyGrid) return;
@@ -3790,7 +4681,7 @@ function filterHistoryPage(query) {
 
 // Recently Watched Functions
 function loadRecentlyWatched() {
-    const recent = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
+    const recent = getRecentlyWatched();
     
     if (!recentlyWatched || !recentGrid) return;
     
@@ -3811,7 +4702,7 @@ function loadRecentlyWatched() {
 
 function saveToRecentlyWatched(item) {
     try {
-        let recent = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
+        let recent = getRecentlyWatched();
         
         // Better duplicate detection: title + channel + timestamp
         const key = `${item.title}_${item.channel}_${item.timestamp}`;
@@ -3839,18 +4730,7 @@ function saveToRecentlyWatched(item) {
         });
         
         recent = recent.slice(0, 30); // Keep max 30 items
-        
-        try {
-            localStorage.setItem('recentlyWatched', JSON.stringify(recent));
-        } catch (quotaErr) {
-            console.warn('[saveToRecentlyWatched] Storage quota reached, trimming history...', quotaErr);
-            recent = recent.slice(0, 10);
-            try {
-                localStorage.setItem('recentlyWatched', JSON.stringify(recent));
-            } catch (e) {
-                console.error('[saveToRecentlyWatched] Could not save history:', e);
-            }
-        }
+        saveRecentlyWatched(recent);
         loadRecentlyWatched();
     } catch (err) {
         console.warn('saveToRecentlyWatched non-fatal error:', err);
@@ -4019,26 +4899,32 @@ console.log('Renderer.js loaded successfully!');
 // ===== LIVE TV CHANNELS =====
 const liveChannels = [
     // ── ARD-Familie ──────────────────────────────────────────────────────────
-    { name: 'Das Erste HD', channel: 'ARD', url: 'https://daserste-live.ard-mcdn.de/daserste/live/hls/de/master.m3u8' },
-    { name: 'tagesschau24', channel: 'ARD', url: 'https://tagesschau.akamaized.net/hls/live/2020115/tagesschau/tagesschau_1/master.m3u8' },
-    { name: 'Phoenix HD',   channel: 'ARD', url: 'https://zdf-hls-19.akamaized.net/hls/live/2016502/de/veryhigh/master.m3u8' },
-    { name: 'ARD alpha',    channel: 'ARD', url: 'https://mcdn.br.de/br/fs/ard_alpha/hls/de/master.m3u8' },
+    { name: 'Das Erste HD',   channel: 'ARD', url: 'https://daserste-live.ard-mcdn.de/daserste/live/hls/de/master.m3u8' },
+    { name: 'tagesschau24',   channel: 'ARD', url: 'https://tagesschau.akamaized.net/hls/live/2020115/tagesschau/tagesschau_1/master.m3u8' },
+    { name: 'ONE HD',         channel: 'ARD', url: 'https://one-live.ard-mcdn.de/one/live/hls/de/master.m3u8' },
+    { name: 'Phoenix HD',     channel: 'ARD', url: 'https://zdf-hls-19.akamaized.net/hls/live/2016502/de/veryhigh/master.m3u8' },
+    { name: 'ARD alpha',      channel: 'ARD', url: 'https://mcdn.br.de/br/fs/ard_alpha/hls/de/master.m3u8' },
+    { name: 'KiKA HD',        channel: 'KiKA', url: 'https://kika-lh.akamaihd.net/i/kika_de@449767/master.m3u8' },
     // ── ZDF-Familie ──────────────────────────────────────────────────────────
-    { name: 'ZDF HD',    channel: 'ZDF', url: 'https://zdf-hls-15.akamaized.net/hls/live/2016498/de/veryhigh/master.m3u8' },
-    { name: 'ZDFneo',    channel: 'ZDF', url: 'https://zdf-hls-16.akamaized.net/hls/live/2016499/de/veryhigh/master.m3u8' },
-    { name: 'ZDFinfo',   channel: 'ZDF', url: 'https://zdf-hls-17.akamaized.net/hls/live/2016500/de/veryhigh/master.m3u8' },
-    { name: '3sat HD',   channel: '3sat', url: 'https://zdf-hls-18.akamaized.net/hls/live/2016501/dach/veryhigh/master.m3u8' },
-    // ── Internationale ───────────────────────────────────────────────────────
-    { name: 'ARTE', channel: 'ARTE', url: 'https://artesimulcast.akamaized.net/hls/live/2030993/artelive_de/master.m3u8' },
+    { name: 'ZDF HD',         channel: 'ZDF', url: 'https://zdf-hls-15.akamaized.net/hls/live/2016498/de/veryhigh/master.m3u8' },
+    { name: 'ZDFneo',         channel: 'ZDF', url: 'https://zdf-hls-16.akamaized.net/hls/live/2016499/de/veryhigh/master.m3u8' },
+    { name: 'ZDFinfo',        channel: 'ZDF', url: 'https://zdf-hls-17.akamaized.net/hls/live/2016500/de/veryhigh/master.m3u8' },
+    { name: '3sat HD',        channel: '3sat', url: 'https://zdf-hls-18.akamaized.net/hls/live/2016501/dach/veryhigh/master.m3u8' },
+    // ── Internationale & Auslandssender ──────────────────────────────────────
+    { name: 'ARTE Deutsch',   channel: 'ARTE', url: 'https://artesimulcast.akamaized.net/hls/live/2030993/artelive_de/master.m3u8' },
+    { name: 'ARTE Français',  channel: 'ARTE', url: 'https://artesimulcast.akamaized.net/hls/live/2030994/artelive_fr/master.m3u8' },
+    { name: 'DW Deutsch',     channel: 'DW',  url: 'https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8' },
+    { name: 'DW English',     channel: 'DW',  url: 'https://dwamdstream104.akamaized.net/hls/live/2015530/dwstream104/index.m3u8' },
     // ── Dritte Programme ─────────────────────────────────────────────────────
-    { name: 'BR Fernsehen', channel: 'BR',  url: 'https://mcdn.br.de/br/fs/bfs_sued/hls/de/master.m3u8' },
-    { name: 'hr-fernsehen', channel: 'HR',  url: 'https://hrhls.akamaized.net/hls/live/2024525/hrhls/master.m3u8' },
-    { name: 'MDR Sachsen',  channel: 'MDR', url: 'https://mdrtvsnhls.akamaized.net/hls/live/2016928/mdrtvsn/master.m3u8' },
-    { name: 'NDR Fernsehen',channel: 'NDR', url: 'https://mcdn.ndr.de/ndr/hls/ndr_fs/ndr_nds/master.m3u8' },
-    { name: 'rbb Fernsehen',channel: 'RBB', url: 'https://rbb-hls-berlin.akamaized.net/hls/live/2017824/rbb_berlin/master.m3u8' },
-    { name: 'SR Fernsehen', channel: 'SR',  url: 'https://srfs.akamaized.net/hls/live/689649/srfsgeo/index.m3u8' },
-    { name: 'SWR BW HD',    channel: 'SWR', url: 'https://swrbwd-hls.akamaized.net/hls/live/2018672/swrbwd/master.m3u8' },
-    { name: 'WDR HD',       channel: 'WDR', url: 'https://wdrfs247.akamaized.net/hls/live/681509/wdr_msl4_fs247/master.m3u8' },
+    { name: 'BR Fernsehen',   channel: 'BR',  url: 'https://mcdn.br.de/br/fs/bfs_sued/hls/de/master.m3u8' },
+    { name: 'hr-fernsehen',   channel: 'HR',  url: 'https://hrhls.akamaized.net/hls/live/2024525/hrhls/master.m3u8' },
+    { name: 'MDR Sachsen',    channel: 'MDR', url: 'https://mdrtvsnhls.akamaized.net/hls/live/2016928/mdrtvsn/master.m3u8' },
+    { name: 'NDR Fernsehen',  channel: 'NDR', url: 'https://mcdn.ndr.de/ndr/hls/ndr_fs/ndr_nds/master.m3u8' },
+    { name: 'Radio Bremen TV',channel: 'RB',  url: 'https://rbhls.akamaized.net/hls/live/2022791/rbhls/master.m3u8' },
+    { name: 'rbb Fernsehen',  channel: 'RBB', url: 'https://rbb-hls-berlin.akamaized.net/hls/live/2017824/rbb_berlin/master.m3u8' },
+    { name: 'SR Fernsehen',   channel: 'SR',  url: 'https://srfs.akamaized.net/hls/live/689649/srfsgeo/index.m3u8' },
+    { name: 'SWR BW HD',      channel: 'SWR', url: 'https://swrbwd-hls.akamaized.net/hls/live/2018672/swrbwd/master.m3u8' },
+    { name: 'WDR HD',         channel: 'WDR', url: 'https://wdrfs247.akamaized.net/hls/live/681509/wdr_msl4_fs247/master.m3u8' },
 ];
 
 function loadLiveChannels() {
@@ -4051,7 +4937,16 @@ function loadLiveChannels() {
     
     grid.innerHTML = '';
     
-    liveChannels.forEach(channel => {
+    const isKids = getActiveProfile().isKids;
+    const channelsToRender = [...liveChannels].sort((a, b) => {
+        if (isKids) {
+            if (a.channel === 'KiKA') return -1;
+            if (b.channel === 'KiKA') return 1;
+        }
+        return 0;
+    });
+    
+    channelsToRender.forEach(channel => {
         const card = document.createElement('div');
         card.className = 'live-channel-card';
         
@@ -4891,63 +5786,182 @@ console.log('Real thumbnail capture system loaded!');
 // ===== TMDB API INTEGRATION =====
 // TMDB API key — loaded from localStorage; users set it in Settings
 // Get a free key at https://www.themoviedb.org/settings/api
-let TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || '';
+const DEFAULT_TMDB_KEY = '849d718b54e75466aeecb0c1b3d05123';
+let TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || DEFAULT_TMDB_KEY;
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
 // Cache for TMDB series data
 const tmdbSeriesCache = new Map();
 
-// Search for a series on TMDB
-async function searchTMDBSeries(seriesName) {
-    // Check if API key is configured
-    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || TMDB_API_KEY || '';
-    if (!TMDB_API_KEY || TMDB_API_KEY === 'YOUR_API_KEY_HERE') {
-        console.log('TMDB API key not configured');
-        return null;
-    }
+// Helper to find expanded series name from episode metadata
+function findBestSeriesSearchQuery(seriesName, episodes = []) {
+    if (!seriesName) return '';
+    if (!episodes || episodes.length === 0) return seriesName;
     
-    // Check cache
-    const cacheKey = `search_${seriesName.toLowerCase()}`;
+    for (const ep of episodes.slice(0, 15)) {
+        const t = (ep.title || '').trim();
+        const d = (ep.description || '').trim();
+        const combo = `${t} ${d}`;
+        
+        if (/^mako$/i.test(seriesName) || /^mako\b/i.test(seriesName)) {
+            if (/meerjungfrau/i.test(combo)) return 'Mako - Einfach Meerjungfrau';
+        }
+        if (/^h2o$/i.test(seriesName) || /^h2o\b/i.test(seriesName)) {
+            if (/meerjungfrau/i.test(combo)) return 'H2O - Plötzlich Meerjungfrau';
+        }
+        if (/robin\s*hood/i.test(seriesName)) {
+            if (ep.channel === 'KiKA' || /sherwood|schlitzohr/i.test(combo)) {
+                return 'Robin Hood - Schlitzohr von Sherwood';
+            }
+        }
+        if (/musketiere/i.test(seriesName)) {
+            if (/drei musketiere/i.test(combo)) return 'Die drei Musketiere';
+        }
+    }
+    return seriesName;
+}
+
+// Search for a series on TMDB with intelligent matching
+async function searchTMDBSeries(seriesName, sampleItem = null) {
+    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || DEFAULT_TMDB_KEY;
+    if (!TMDB_API_KEY || !seriesName) return null;
+
+    const channel = sampleItem ? (sampleItem.channel || '') : '';
+    const isKidsContext = (typeof getActiveProfile === 'function' && getActiveProfile().isKids) || 
+                          (channel === 'KiKA' || (sampleItem && sampleItem.duration && sampleItem.duration <= 1200));
+    const cacheKey = `search_${seriesName.toLowerCase()}_${isKidsContext ? 'kids' : 'all'}`;
     if (tmdbSeriesCache.has(cacheKey)) {
         return tmdbSeriesCache.get(cacheKey);
     }
-    
-    try {
-        const url = `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&language=de-DE&query=${encodeURIComponent(seriesName)}`;
-        console.log('Searching TMDB for:', seriesName);
-        
-        const response = await fetch(url);
-        if (!response.ok) {
-            console.error('TMDB search failed:', response.status);
-            return null;
-        }
-        
-        const data = await response.json();
-        
-        if (data.results && data.results.length > 0) {
-            const series = data.results[0]; // Take first result
-            console.log('Found TMDB series:', series.name, 'ID:', series.id);
-            
-            // Cache the result
-            tmdbSeriesCache.set(cacheKey, series);
-            return series;
-        }
-        
-        return null;
-    } catch (error) {
-        console.error('TMDB search error:', error);
-        return null;
+
+    const cleanSpace = seriesName.replace(/[\-–—:_]/g, ' ').replace(/\s+/g, ' ').trim();
+    const cleanNoBrackets = cleanSpace.replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+    const firstWord = cleanNoBrackets.split(' ')[0] || '';
+    const queries = [
+        cleanSpace,
+        cleanNoBrackets,
+        seriesName.trim()
+    ];
+    if (firstWord.length >= 3 && firstWord !== cleanNoBrackets) {
+        queries.push(firstWord);
     }
+
+    const uniqueQueries = queries.filter((q, idx, arr) => q && q.length >= 2 && arr.indexOf(q) === idx);
+
+    const candidatesMap = new Map();
+
+    for (const q of uniqueQueries) {
+        try {
+            const url = `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&language=de-DE&query=${encodeURIComponent(q)}`;
+            const response = await fetch(url);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.results && data.results.length > 0) {
+                    data.results.forEach(r => {
+                        if (r && r.id && !candidatesMap.has(r.id)) {
+                            candidatesMap.set(r.id, r);
+                        }
+                    });
+                }
+            }
+        } catch(e) {}
+    }
+
+    const candidates = Array.from(candidatesMap.values());
+    if (candidates.length === 0) return null;
+
+    function scoreCandidate(candidate) {
+        const clean = s => (s || '').toLowerCase()
+            .replace(/[–—:\-_,!?.\'\"\(\)\[\]\/]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        
+        const qClean = clean(seriesName);
+        const nameClean = clean(candidate.name);
+        const origClean = clean(candidate.original_name);
+        
+        // Exact match (100%)
+        if (nameClean === qClean || origClean === qClean) return 1.0;
+        
+        // Prefix match (e.g. "Mako" matches "Mako – Einfach Meerjungfrau")
+        if (nameClean.startsWith(qClean) || origClean.startsWith(qClean) || qClean.startsWith(nameClean)) {
+            let s = 0.85;
+            if (isKidsContext) {
+                const hasKidsGenre = candidate.genre_ids && (
+                    candidate.genre_ids.includes(16) || 
+                    candidate.genre_ids.includes(10762) || 
+                    candidate.genre_ids.includes(10751) || 
+                    candidate.genre_ids.includes(10765)
+                );
+                if (hasKidsGenre) s += 0.15;
+            }
+            return Math.min(1.0, s);
+        }
+        
+        // Word overlap match
+        const stopWords = new Set(['die','der','das','und','von','mit','im','in','aus','auf','zu','ein','eine','einer','eines']);
+        const qWords = qClean.split(' ').filter(w => w.length > 1 && !stopWords.has(w));
+        const cWords = (nameClean + ' ' + origClean).split(' ').filter(w => w.length > 1);
+        
+        if (qWords.length === 0 || cWords.length === 0) return 0;
+        
+        let matchedWords = 0;
+        qWords.forEach(qw => {
+            if (cWords.some(cw => cw === qw || (qw.length >= 4 && cw.includes(qw)))) {
+                matchedWords++;
+            }
+        });
+        
+        const overlap = matchedWords / qWords.length;
+        if (overlap < 0.5) return 0;
+        
+        let score = overlap * 0.8;
+
+        if (isKidsContext) {
+            const hasKidsGenre = candidate.genre_ids && (
+                candidate.genre_ids.includes(16) || 
+                candidate.genre_ids.includes(10762) || 
+                candidate.genre_ids.includes(10751) ||
+                candidate.genre_ids.includes(10765)
+            );
+            if (hasKidsGenre) score += 0.15;
+
+            // Reject ancient 1970 anime false positives when original isn't 1970
+            if (candidate.first_air_date) {
+                const year = parseInt(candidate.first_air_date.split('-')[0], 10);
+                if (year < 1980 && !qClean.includes('1970')) {
+                    score -= 0.4;
+                }
+            }
+        }
+
+        return Math.min(1.0, score);
+    }
+
+    let bestMatch = null;
+    let highestScore = 0;
+
+    candidates.forEach(cand => {
+        const s = scoreCandidate(cand);
+        if (s > highestScore) {
+            highestScore = s;
+            bestMatch = cand;
+        }
+    });
+
+    if (bestMatch && highestScore >= 0.6) {
+        tmdbSeriesCache.set(cacheKey, bestMatch);
+        return bestMatch;
+    }
+
+    return null;
 }
 
 // Get detailed series information from TMDB
 async function getTMDBSeriesDetails(seriesId) {
-    // Check if API key is configured
-    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || TMDB_API_KEY || '';
-    if (!TMDB_API_KEY || TMDB_API_KEY === 'YOUR_API_KEY_HERE') {
-        return null;
-    }
+    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || DEFAULT_TMDB_KEY;
+    if (!TMDB_API_KEY) return null;
     
     // Check cache
     const cacheKey = `details_${seriesId}`;
@@ -4957,22 +5971,15 @@ async function getTMDBSeriesDetails(seriesId) {
     
     try {
         const url = `${TMDB_BASE_URL}/tv/${seriesId}?api_key=${TMDB_API_KEY}&language=de-DE`;
-        console.log('Fetching TMDB details for ID:', seriesId);
-        
         const response = await fetch(url);
         if (!response.ok) {
-            console.error('TMDB details failed:', response.status);
             return null;
         }
         
         const data = await response.json();
-        console.log('Got TMDB details:', data.name);
-        
-        // Cache the result
         tmdbSeriesCache.set(cacheKey, data);
         return data;
     } catch (error) {
-        console.error('TMDB details error:', error);
         return null;
     }
 }
@@ -5033,8 +6040,8 @@ function applyTheme(theme) {
 
 // ===== STATISTIKEN =====
 function loadStatsPage() {
-    const recent = JSON.parse(localStorage.getItem('recentlyWatched') || '[]');
-    const progressMap = JSON.parse(localStorage.getItem('videoProgressMap') || '{}');
+    const recent = getRecentlyWatched();
+    const progressMap = JSON.parse(localStorage.getItem(getProfileKey('videoProgressMap')) || '{}');
     
     // 1. Wiedergabezeit
     let totalSeconds = 0;
@@ -5310,12 +6317,12 @@ async function fetchTrailerUrl(title, channel) {
 // ============================================================
 
 function getAbos() {
-    try { return JSON.parse(localStorage.getItem('streamhub_abos') || '[]'); }
+    try { return JSON.parse(localStorage.getItem(getProfileKey('streamhub_abos')) || '[]'); }
     catch { return []; }
 }
 
 function saveAbos(abos) {
-    localStorage.setItem('streamhub_abos', JSON.stringify(abos));
+    _safeSetItem(getProfileKey('streamhub_abos'), JSON.stringify(abos));
 }
 
 function loadAbosPage() {

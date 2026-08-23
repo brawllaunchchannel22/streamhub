@@ -1,6 +1,6 @@
 {
   "name": "streamhub",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "description": "Moderne Mediathek-App für deutsche Sender",
   "main": "main.js",
   "author": {
