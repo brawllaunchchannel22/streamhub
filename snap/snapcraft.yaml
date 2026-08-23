@@ -32,10 +32,13 @@ parts:
     source: .
     build-snaps:
       - node/20/stable
-    override-build: |
+    override-pull: |
+      craftctl default || snapcraftctl default || true
       npm install --legacy-peer-deps
       npx electron-builder --linux --dir
+    override-build: |
       mkdir -p $CRAFT_PART_INSTALL/opt/streamhub
       cp -r dist/linux-unpacked/* $CRAFT_PART_INSTALL/opt/streamhub/
+
 
 
