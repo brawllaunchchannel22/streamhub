@@ -28,7 +28,14 @@ apps:
 
 parts:
   streamhub:
-    plugin: dump
-    source: dist/linux-unpacked
-    organize:
-      '*': opt/streamhub/
+    plugin: nil
+    source: .
+    override-build: |
+      npm install --legacy-peer-deps
+      npx electron-builder --linux --dir
+      mkdir -p $CRAFT_PART_INSTALL/opt/streamhub
+      cp -r dist/linux-unpacked/* $CRAFT_PART_INSTALL/opt/streamhub/
+    build-packages:
+      - nodejs
+      - npm
+
