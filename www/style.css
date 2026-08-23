@@ -3759,3 +3759,22 @@ body.in-pip-mode #videoModal video {
     margin-top: 10px;
 }
 
+/* Mobile: profile modal actions wrap so Import/Export stay visible */
+@media (max-width: 480px) {
+    .profile-modal-actions {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .profile-modal-actions-right {
+        flex: 1;
+        justify-content: flex-end;
+    }
+    #modalExportBackupBtn,
+    #modalImportBackupLabel {
+        min-width: 90px;
+        justify-content: center;
+        white-space: nowrap;
+        font-size: 0.82rem;
+        padding: 8px 12px;
+    }
+}

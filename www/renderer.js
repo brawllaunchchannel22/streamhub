@@ -474,22 +474,59 @@ function exportStreamHubData() {
         };
         
         const jsonStr = JSON.stringify(backup, null, 2);
+        const dateStr = new Date().toISOString().split('T')[0];
+        const fileName = `streamhub_backup_${dateStr}.json`;
+
+        // Android / Capacitor: Use Web Share API if available (shows "Save to Files", "Share via..." etc.)
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        
+        const isAndroid = /android/i.test(navigator.userAgent) || (typeof Capacitor !== 'undefined');
+        
+        if (isAndroid && navigator.share) {
+            const file = new File([blob], fileName, { type: 'application/json' });
+            navigator.share({ files: [file], title: 'StreamHub Backup' })
+                .then(() => showNotification('✅ Backup geteilt/gespeichert!', 'success'))
+                .catch(err => {
+                    if (err.name !== 'AbortError') {
+                        // Fallback: data URI copy
+                        _exportViaDataUri(jsonStr, fileName);
+                    }
+                });
+        } else {
+            // Desktop: classic anchor download
+            _exportViaDataUri(jsonStr, fileName);
+        }
+    } catch(err) {
+        console.error('Export error:', err);
+        showNotification('❌ Fehler beim Export: ' + err.message, 'error');
+    }
+}
+
+function _exportViaDataUri(jsonStr, fileName) {
+    try {
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
-        
         const a = document.createElement('a');
-        const dateStr = new Date().toISOString().split('T')[0];
         a.href = url;
-        a.download = `streamhub_backup_${dateStr}.json`;
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
         showNotification('✅ Backup-Datei erfolgreich exportiert!', 'success');
-    } catch(err) {
-        console.error('Export error:', err);
-        showNotification('❌ Fehler beim Export: ' + err.message, 'error');
+    } catch(e) {
+        // Ultimate fallback: show JSON in a textarea the user can copy
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999999;display:flex;align-items:center;justify-content:center;padding:1rem;';
+        modal.innerHTML = `
+            <div style="background:#1e1e2e;border-radius:16px;padding:24px;max-width:600px;width:100%;max-height:80vh;overflow-y:auto;">
+                <h3 style="margin:0 0 12px;color:#fff;">Backup-Daten</h3>
+                <p style="color:#94a3b8;font-size:0.85rem;margin-bottom:12px;">Kopiere den Text unten und speichere ihn als <strong>${fileName}</strong></p>
+                <textarea style="width:100%;height:300px;background:#0f0f1a;color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px;font-size:0.8rem;font-family:monospace;" readonly>${jsonStr}</textarea>
+                <button onclick="this.closest('div[style]').remove()" style="margin-top:12px;padding:10px 20px;background:#6366f1;color:#fff;border:none;border-radius:100px;cursor:pointer;font-size:0.9rem;">Schließen</button>
+            </div>
+        `;
+        document.body.appendChild(modal);
     }
 }
 
@@ -506,65 +543,13 @@ function importStreamHubDataFromFile(file) {
             }
             
             const dateStr = backup.exportedAt ? new Date(backup.exportedAt).toLocaleDateString('de-DE') : 'unbekannt';
-            if (!confirm(`Möchtest du das Backup (erstellt am ${dateStr}) importieren?\n\nDeine bestehenden Profile bleiben erhalten, neue Profile aus dem Backup werden hinzugefügt.`)) {
-                return;
-            }
             
-            // MERGE profiles (don't overwrite existing profiles!)
-            if (Array.isArray(backup.profiles) && backup.profiles.length > 0) {
-                const existingProfiles = getProfiles();
-                const existingIds = new Set(existingProfiles.map(p => p.id));
-                const newProfiles = backup.profiles.filter(p => !existingIds.has(p.id));
-                const merged = [...existingProfiles, ...newProfiles];
-                saveProfiles(merged);
-            }
-            
-            // Restore Data for imported profiles only
-            if (backup.profileData && typeof backup.profileData === 'object') {
-                const profileKeys = [
-                    'streamhubWatchlist',
-                    'streamhubWatchLater',
-                    'streamhubPlaylists',
-                    'recentlyWatched',
-                    'videoProgressMap',
-                    'streamhubSearchHistory',
-                    'streamhub_abos'
-                ];
-                
-                Object.keys(backup.profileData).forEach(pId => {
-                    const dataObj = backup.profileData[pId];
-                    if (!dataObj) return;
-                    profileKeys.forEach(k => {
-                        if (dataObj[k] !== undefined) {
-                            const storageKey = (pId === 'default') ? k : `sh_p_${pId}_${k}`;
-                            const valStr = typeof dataObj[k] === 'string' ? dataObj[k] : JSON.stringify(dataObj[k]);
-                            _safeSetItem(storageKey, valStr);
-                        }
-                    });
-                });
-            }
-            
-            // Restore Settings
-            if (backup.settings) {
-                if (backup.settings.selectedTheme) {
-                    localStorage.setItem('selectedTheme', backup.settings.selectedTheme);
-                    applyTheme(backup.settings.selectedTheme);
-                }
-                if (backup.settings.useRealThumbnails !== undefined) {
-                    localStorage.setItem('useRealThumbnails', backup.settings.useRealThumbnails);
-                    useRealThumbnails = backup.settings.useRealThumbnails;
-                }
-                if (backup.settings.tmdbApiKey) {
-                    localStorage.setItem('tmdbApiKey', backup.settings.tmdbApiKey);
-                }
-            }
-            
-            updateProfileUI();
-            refreshCurrentPageData();
-            renderProfileSettingsList();
-            renderModalProfilesGrid();
-            
-            showNotification('✅ Backup erfolgreich importiert! Profile wurden zusammengeführt.', 'success');
+            // Android-safe confirm: use our own modal instead of window.confirm which is blocked in WebView
+            _showConfirmDialog(
+                `Backup importieren?`,
+                `Erstellt am: ${dateStr}\n\nBestehende Profile bleiben erhalten, neue Profile aus dem Backup werden hinzugefügt.`,
+                () => _doImport(backup)
+            );
         } catch(err) {
             console.error('Import parse error:', err);
             showNotification('❌ Fehler beim Import: ' + err.message, 'error');
@@ -572,6 +557,98 @@ function importStreamHubDataFromFile(file) {
     };
     reader.readAsText(file);
 }
+
+function _doImport(backup) {
+    try {
+        const profileKeys = [
+            'streamhubWatchlist',
+            'streamhubWatchLater',
+            'streamhubPlaylists',
+            'recentlyWatched',
+            'videoProgressMap',
+            'streamhubSearchHistory',
+            'streamhub_abos'
+        ];
+
+        // MERGE profiles
+        if (Array.isArray(backup.profiles) && backup.profiles.length > 0) {
+            const existingProfiles = getProfiles();
+            const existingIds = new Set(existingProfiles.map(p => p.id));
+            const newProfiles = backup.profiles.filter(p => !existingIds.has(p.id));
+            const merged = [...existingProfiles, ...newProfiles];
+            saveProfiles(merged);
+        }
+        
+        // Restore data
+        if (backup.profileData && typeof backup.profileData === 'object') {
+            Object.keys(backup.profileData).forEach(pId => {
+                const dataObj = backup.profileData[pId];
+                if (!dataObj) return;
+                profileKeys.forEach(k => {
+                    if (dataObj[k] !== undefined) {
+                        const storageKey = (pId === 'default') ? k : `sh_p_${pId}_${k}`;
+                        const valStr = typeof dataObj[k] === 'string' ? dataObj[k] : JSON.stringify(dataObj[k]);
+                        _safeSetItem(storageKey, valStr);
+                    }
+                });
+            });
+        }
+        
+        // Restore settings
+        if (backup.settings) {
+            if (backup.settings.selectedTheme) {
+                localStorage.setItem('selectedTheme', backup.settings.selectedTheme);
+                applyTheme(backup.settings.selectedTheme);
+            }
+            if (backup.settings.useRealThumbnails !== undefined) {
+                localStorage.setItem('useRealThumbnails', backup.settings.useRealThumbnails);
+                useRealThumbnails = backup.settings.useRealThumbnails;
+            }
+            if (backup.settings.tmdbApiKey) {
+                localStorage.setItem('tmdbApiKey', backup.settings.tmdbApiKey);
+            }
+        }
+        
+        updateProfileUI();
+        refreshCurrentPageData();
+        renderProfileSettingsList();
+        renderModalProfilesGrid();
+        
+        showNotification('✅ Backup erfolgreich importiert! Profile wurden zusammengeführt.', 'success');
+    } catch(err) {
+        console.error('Import error:', err);
+        showNotification('❌ Fehler beim Import: ' + err.message, 'error');
+    }
+}
+
+// Android-safe confirm dialog (window.confirm is blocked in WebView)
+function _showConfirmDialog(title, message, onConfirm) {
+    // Try native confirm first (works on desktop/Electron)
+    try {
+        if (typeof window.confirm === 'function' && !/android/i.test(navigator.userAgent) && typeof Capacitor === 'undefined') {
+            if (window.confirm(`${title}\n\n${message}`)) onConfirm();
+            return;
+        }
+    } catch(e) {}
+
+    // Custom modal for Android
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:999999;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+    overlay.innerHTML = `
+        <div style="background:#1e1e2e;border-radius:20px;padding:28px;max-width:480px;width:100%;border:1px solid rgba(255,255,255,0.1);">
+            <h3 style="margin:0 0 12px;color:#fff;font-size:1.1rem;">${title}</h3>
+            <p style="color:#94a3b8;font-size:0.9rem;white-space:pre-line;margin-bottom:24px;">${message}</p>
+            <div style="display:flex;gap:12px;justify-content:flex-end;">
+                <button id="_confirmNo" style="padding:10px 20px;background:rgba(255,255,255,0.08);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);border-radius:100px;cursor:pointer;font-size:0.9rem;">Abbrechen</button>
+                <button id="_confirmYes" style="padding:10px 22px;background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;border:none;border-radius:100px;cursor:pointer;font-size:0.9rem;font-weight:600;">Importieren</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#_confirmNo').onclick = () => overlay.remove();
+    overlay.querySelector('#_confirmYes').onclick = () => { overlay.remove(); onConfirm(); };
+}
+
 
 function initProfileSystem() {
     updateProfileUI();
