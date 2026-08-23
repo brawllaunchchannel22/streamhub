@@ -463,13 +463,17 @@ function exportStreamHubData() {
         const dateStr = new Date().toISOString().split('T')[0];
         const fileName = `streamhub_backup_${dateStr}.json`;
 
-        // STEP 1: Always save internally first (guaranteed fallback on every platform)
+        // STEP 1: Always save in localStorage first (guaranteed app-internal backup)
         try {
             localStorage.setItem('sh_last_backup_json', jsonStr);
             localStorage.setItem('sh_last_backup_date', new Date().toISOString());
-        } catch(e) { /* storage quota - skip */ }
+        } catch(e) { /* quota - skip */ }
 
-        // STEP 2: Try native file export
+        // Update the history button in modal if present
+        const modalShowLastBackupBtn = document.getElementById('modalShowLastBackupBtn');
+        if (modalShowLastBackupBtn) modalShowLastBackupBtn.style.display = '';
+
+        // STEP 2: Try native export
         const isAndroid = /android/i.test(navigator.userAgent) || (typeof Capacitor !== 'undefined');
         if (isAndroid) {
             _exportAndroid(jsonStr, fileName);
@@ -483,42 +487,90 @@ function exportStreamHubData() {
 }
 
 async function _exportAndroid(jsonStr, fileName) {
-    // Try 1: Web Share API with File object (Android 10+ / Capacitor WebView)
+    let fileUri = null;
+    let savedLocation = '';
+
+    // Method 1: Native Capacitor Filesystem -> write directly to DOCUMENTS / DOWNLOADS
+    if (window.Capacitor?.Plugins?.Filesystem) {
+        const fs = window.Capacitor.Plugins.Filesystem;
+        // Try Documents directory
+        try {
+            const res = await fs.writeFile({
+                path: fileName,
+                data: jsonStr,
+                directory: 'DOCUMENTS',
+                encoding: 'utf8',
+                recursive: true
+            });
+            if (res && res.uri) {
+                fileUri = res.uri;
+                savedLocation = 'Dokumente';
+            }
+        } catch(eDocs) {
+            console.warn('Filesystem DOCUMENTS failed, trying CACHE:', eDocs);
+            try {
+                const res = await fs.writeFile({
+                    path: fileName,
+                    data: jsonStr,
+                    directory: 'CACHE',
+                    encoding: 'utf8',
+                    recursive: true
+                });
+                if (res && res.uri) {
+                    fileUri = res.uri;
+                }
+            } catch(eCache) {
+                console.warn('Filesystem CACHE failed:', eCache);
+            }
+        }
+    }
+
+    // Method 2: Native Capacitor Share Sheet (triggers native Android Share dialog)
+    if (fileUri && window.Capacitor?.Plugins?.Share) {
+        try {
+            await window.Capacitor.Plugins.Share.share({
+                title: 'StreamHub Backup',
+                text: 'StreamHub Sicherungsdatei',
+                url: fileUri,
+                dialogTitle: 'Backup sichern oder teilen'
+            });
+            showNotification(savedLocation ? `✅ Gespeichert in ${savedLocation} & geteilt!` : '✅ Backup geteilt!', 'success');
+            return;
+        } catch(shareErr) {
+            const msg = (shareErr && shareErr.message) || '';
+            if (shareErr.name === 'AbortError' || msg.toLowerCase().includes('cancel') || msg.toLowerCase().includes('dismiss')) {
+                if (savedLocation) {
+                    showNotification(`✅ Backup gespeichert im Ordner "${savedLocation}" (${fileName})!`, 'success', 5000);
+                    return;
+                }
+            }
+            console.warn('Capacitor Share failed:', shareErr);
+        }
+    }
+
+    // Method 3: Web Share API (File object)
     try {
         if (navigator.canShare && navigator.share) {
             const blob = new Blob([jsonStr], { type: 'application/json' });
             const file = new File([blob], fileName, { type: 'application/json' });
             if (navigator.canShare({ files: [file] })) {
                 await navigator.share({ files: [file], title: 'StreamHub Backup' });
-                showNotification('Backup geteilt! Tippe auf "In Dateien speichern".', 'success');
+                showNotification('✅ Backup geteilt!', 'success');
                 return;
             }
         }
     } catch(e) {
         if (e.name === 'AbortError') return;
-        console.warn('Share API:', e);
+        console.warn('Web Share API failed:', e);
     }
 
-    // Try 2: Classic anchor download
-    try {
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = fileName;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
-        showNotification('Backup-Download gestartet...', 'success');
+    // If file was written to disk, notify user
+    if (savedLocation) {
+        showNotification(`✅ Backup gespeichert im Ordner "${savedLocation}" (${fileName})!`, 'success', 5000);
         return;
-    } catch(e) { console.warn('Anchor dl:', e); }
+    }
 
-    // Try 3: Clipboard
-    try {
-        await navigator.clipboard.writeText(jsonStr);
-        showNotification('Backup in Zwischenablage kopiert! In Notiz-App einfuegen & als .json speichern.', 'info', 6000);
-        return;
-    } catch(e) { console.warn('Clipboard:', e); }
-
-    // Try 4: Show inline modal (backup is already in localStorage)
+    // Method 4: Visual Modal with one-tap copy and JSON text (guaranteed 100% visible)
     _showBackupModal(jsonStr, fileName);
 }
 
@@ -531,22 +583,28 @@ function _showBackupModal(jsonStr, fileName) {
     const inner = document.createElement('div');
     inner.style.cssText = 'background:#1e1e2e;border-radius:20px;padding:24px;max-width:600px;width:100%;max-height:85vh;overflow-y:auto;border:1px solid rgba(255,255,255,0.1);';
     inner.innerHTML = `
-        <h3 style="margin:0 0 6px;color:#fff;font-size:1.05rem;">Backup intern gespeichert</h3>
-        <p style="color:#94a3b8;font-size:0.82rem;margin:0 0 4px;">Das Backup liegt sicher in der App. Kopiere den Text und sende ihn per WhatsApp/Mail oder speichere ihn in einer Notiz.</p>
-        <p style="color:#6366f1;font-size:0.78rem;margin:0 0 12px;">Datei: <strong>${fileName}</strong></p>
-        <textarea id="_bkTextarea" style="width:100%;height:200px;background:#0f0f1a;color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:10px;font-size:0.72rem;font-family:monospace;resize:none;box-sizing:border-box;" readonly></textarea>
-        <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
-            <button id="_bkCopyBtn" style="flex:1;min-width:120px;padding:10px 16px;background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;border:none;border-radius:100px;cursor:pointer;font-size:0.9rem;font-weight:600;">Kopieren</button>
-            <button id="_bkCloseBtn" style="flex:1;min-width:100px;padding:10px 16px;background:rgba(255,255,255,0.08);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);border-radius:100px;cursor:pointer;font-size:0.9rem;">Schliessen</button>
+        <h3 style="margin:0 0 6px;color:#fff;font-size:1.05rem;"><i class="fas fa-save" style="color:#6366f1;"></i> Backup gesichert</h3>
+        <p style="color:#94a3b8;font-size:0.82rem;margin:0 0 4px;">Das Backup ist intern in der App gespeichert. Du kannst den Text kopieren oder teilen:</p>
+        <p style="color:#6366f1;font-size:0.78rem;margin:0 0 12px;"><i class="fas fa-file-code"></i> <strong>${fileName}</strong></p>
+        <textarea id="_bkTextarea" style="width:100%;height:180px;background:#0f0f1a;color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:10px;font-size:0.72rem;font-family:monospace;resize:none;box-sizing:border-box;" readonly></textarea>
+        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
+            <button id="_bkCopyBtn" style="flex:1;min-width:130px;padding:11px 16px;background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;border:none;border-radius:100px;cursor:pointer;font-size:0.9rem;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-copy"></i> Kopieren</button>
+            <button id="_bkCloseBtn" style="flex:1;min-width:100px;padding:11px 16px;background:rgba(255,255,255,0.08);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);border-radius:100px;cursor:pointer;font-size:0.9rem;">Schließen</button>
         </div>`;
     modal.appendChild(inner);
     document.body.appendChild(modal);
     inner.querySelector('#_bkTextarea').value = jsonStr;
     inner.querySelector('#_bkCloseBtn').onclick = () => modal.remove();
     inner.querySelector('#_bkCopyBtn').onclick = async () => {
-        try { await navigator.clipboard.writeText(jsonStr); }
-        catch(e) { const ta = inner.querySelector('#_bkTextarea'); ta.select(); document.execCommand('copy'); }
-        inner.querySelector('#_bkCopyBtn').textContent = 'Kopiert!';
+        try {
+            await navigator.clipboard.writeText(jsonStr);
+        } catch(e) {
+            const ta = inner.querySelector('#_bkTextarea');
+            ta.select();
+            document.execCommand('copy');
+        }
+        inner.querySelector('#_bkCopyBtn').innerHTML = '<i class="fas fa-check"></i> Kopiert!';
+        showNotification('✅ In Zwischenablage kopiert!', 'success');
     };
 }
 
@@ -555,15 +613,17 @@ function _exportViaDataUri(jsonStr, fileName) {
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = fileName;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        showNotification('Backup-Datei erfolgreich exportiert!', 'success');
+        showNotification('✅ Backup-Datei erfolgreich exportiert!', 'success');
     } catch(e) {
         _showBackupModal(jsonStr, fileName);
     }
 }
-
 
 function importStreamHubDataFromFile(file) {
     if (!file) return;
