@@ -1,4 +1,4 @@
-// StreamHub v2.4.0 - SIMPLE & STABLE VERSION
+// StreamHub v3.0.5 - Arrow key seeking + Fullscreen focus fix
 console.log('StreamHub starting...');
 
 
@@ -1710,6 +1710,7 @@ function init() {
         window._releaseWakeLock = releaseWakeLock;
 
         if (videoPlayer) {
+
             videoPlayer.addEventListener('play', () => {
                 document.title = '[PLAYING] StreamHub';
                 requestWakeLock();
@@ -2072,49 +2073,58 @@ function attachEventListeners() {
             backdrop.addEventListener('click', closeVideoModal);
         }
     }
-    
-    // Video controls
-    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    // ── Fullscreen Logic ─────────────────────────────────────────────────────
+    // Both the F hotkey, the Vollbild action button, and the native controls
+    // fullscreen button on the screen target the EXACT same element: videoPlayer.
+    // This guarantees the on-screen button ALWAYS knows whether the video is in
+    // fullscreen, so clicking it ALWAYS enters or exits cleanly!
+
+    function _blurAll() {
+        if (document.activeElement && document.activeElement !== document.body) {
+            document.activeElement.blur();
+        }
+    }
+
+    function toggleFullscreen() {
+        if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+        } else if (videoPlayer) {
+            if (videoPlayer.requestFullscreen) {
+                videoPlayer.requestFullscreen().catch((err) => console.warn('FS error:', err));
+            } else if (videoPlayer.webkitRequestFullscreen) {
+                videoPlayer.webkitRequestFullscreen();
+            }
+        }
+        _blurAll();
+    }
+    window.toggleFullscreen = toggleFullscreen;
+
+    document.addEventListener('fullscreenchange', () => {
+        const isFs = !!document.fullscreenElement;
+        if (fullscreenBtn) {
+            fullscreenBtn.innerHTML = isFs
+                ? '<i class="fas fa-compress"></i> Vollbild'
+                : '<i class="fas fa-expand"></i> Vollbild';
+        }
+        _blurAll();
+        setTimeout(_blurAll, 50);
+    });
+
     if (fullscreenBtn) {
-        // Only intercept Spacebar — redirect to play/pause instead of triggering the button.
-        // Enter should still activate the button normally.
+        fullscreenBtn.addEventListener('click', () => { toggleFullscreen(); });
         fullscreenBtn.addEventListener('keydown', (e) => {
             if (e.code === 'Space' || e.key === ' ') {
-                e.preventDefault();
-                e.stopPropagation();
+                e.preventDefault(); e.stopPropagation();
                 if (videoPlayer) {
-                    videoPlayer.paused
-                        ? videoPlayer.play().catch(() => {})
-                        : videoPlayer.pause();
+                    videoPlayer.paused ? videoPlayer.play().catch(() => {}) : videoPlayer.pause();
                 }
-                // Immediately blur so the button doesn't stay focused
-                fullscreenBtn.blur();
+                _blurAll();
+                return;
             }
-        });
-
-        fullscreenBtn.addEventListener('click', () => {
-            if (videoPlayer) {
-                if (document.fullscreenElement) {
-                    document.exitFullscreen().catch(e => console.warn('exitFullscreen:', e));
-                } else {
-                    const container = videoPlayer.closest('.video-player-container') || videoPlayer.parentElement;
-                    if (container && container.requestFullscreen) {
-                        container.requestFullscreen().catch(e => console.warn('requestFullscreen:', e));
-                    } else if (videoPlayer.requestFullscreen) {
-                        videoPlayer.requestFullscreen().catch(e => console.warn('requestFullscreen:', e));
-                    }
-                }
-            }
-            fullscreenBtn.blur();
-        });
-
-        // Update button icon whenever fullscreen state changes
-        document.addEventListener('fullscreenchange', () => {
-            if (document.fullscreenElement) {
-                fullscreenBtn.innerHTML = '<i class="fas fa-compress"></i> Vollbild';
-            } else {
-                fullscreenBtn.innerHTML = '<i class="fas fa-expand"></i> Vollbild';
-                fullscreenBtn.blur();
+            if (e.key === 'f' || e.key === 'F' || e.key === 'Enter') {
+                e.preventDefault(); e.stopPropagation();
+                toggleFullscreen();
+                return;
             }
         });
     }
@@ -2412,6 +2422,39 @@ function attachEventListeners() {
         return false;
     };
 
+    // ── Double-Back-to-Exit (Android) ─────────────────────────────────────────
+    // When _handleBackAction returns false (nothing to close), we're on the home
+    // screen. One back = toast "Nochmal drücken zum Beenden", second back within
+    // 2 s calls AndroidNativeTheme.finishApp() to properly close the app.
+    let _backToExitPending = false;
+    let _backToExitTimer   = null;
+    const _origHandleBack  = window._handleBackAction;
+    window._handleBackAction = function handleBackActionWithExit() {
+        const handled = _origHandleBack();
+        if (!handled && window.AndroidNativeTheme) {
+            if (_backToExitPending) {
+                // Second press — close the app
+                clearTimeout(_backToExitTimer);
+                _backToExitPending = false;
+                try {
+                    if (typeof AndroidNativeTheme.finishApp === 'function') {
+                        AndroidNativeTheme.finishApp();
+                    } else if (typeof AndroidNativeTheme.exitApp === 'function') {
+                        AndroidNativeTheme.exitApp();
+                    }
+                } catch(e) { console.warn('finishApp failed:', e); }
+            } else {
+                // First press — show toast
+                _backToExitPending = true;
+                showNotification('Nochmal drücken zum Beenden', 'info');
+                _backToExitTimer = setTimeout(() => {
+                    _backToExitPending = false;
+                }, 2000);
+            }
+        }
+        return handled;
+    };
+
     // Keyboard Escape key and Spacebar (desktop / emulator)
     // Using capturing phase (true) to intercept spacebar/escape before focused buttons can act on them.
     document.addEventListener('keydown', (e) => {
@@ -2472,6 +2515,37 @@ function attachEventListeners() {
                         videoPlayer.pause();
                     }
                 }
+            }
+        }
+
+        // ── Arrow key seeking ──────────────────────────────────────────────────
+        // ArrowLeft = 10 s back, ArrowRight = 10 s forward (only in video modal)
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            const active = document.activeElement;
+            // Don't hijack arrows in form inputs
+            if (active && (
+                active.tagName === 'INPUT' ||
+                active.tagName === 'TEXTAREA' ||
+                active.tagName === 'SELECT' ||
+                active.isContentEditable
+            )) return;
+
+            const vmEl = document.getElementById('videoModal');
+            const tcEl = document.getElementById('trailerPlayerContainer');
+            if (vmEl && vmEl.classList.contains('active') &&
+                (!tcEl || tcEl.style.display === 'none') &&
+                videoPlayer && isFinite(videoPlayer.duration)) {
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                const seekAmount = 10; // seconds
+                if (e.key === 'ArrowLeft') {
+                    videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - seekAmount);
+                } else {
+                    videoPlayer.currentTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + seekAmount);
+                }
+                (window._showSeekOverlay || _showSeekOverlay)(e.key === 'ArrowLeft' ? -seekAmount : seekAmount);
             }
         }
     }, true);
@@ -3981,6 +4055,7 @@ function playVideo(item) {
         // Always open video modal so user sees response
         if (videoModal) videoModal.classList.add('active');
         try { if (window.AndroidNativeTheme && window.AndroidNativeTheme.updatePipAutoEnter) window.AndroidNativeTheme.updatePipAutoEnter(true); } catch(e){}
+        setTimeout(() => { if (typeof window._updateAndroidPipBounds === 'function') window._updateAndroidPipBounds(); }, 250);
         // Re-init the 2x hold zone – the container exists now that modal is open
         setTimeout(() => {
             if (typeof window._reinitHoldZone2x === 'function') window._reinitHoldZone2x();
@@ -7057,7 +7132,15 @@ function initDownloadsPage() {
     }
 }
 
+// ── Seek Overlay ──────────────────────────────────────────────────────────────
+// Delegates to window._showSeekOverlay which uses the static HTML element
+// (always inside .video-player-container = fullscreen element, works in both modes)
+function _showSeekOverlay(seconds) {
+    if (window._showSeekOverlay) { window._showSeekOverlay(seconds); }
+}
+
 function showNotification(message, type = 'info', action = null) {
+
     let container = document.getElementById('toastContainer');
     if (!container) {
         container = document.createElement('div');
@@ -7804,3 +7887,440 @@ document.addEventListener('DOMContentLoaded', () => {
         obs.observe(videoModal, { attributes: true, attributeFilter: ['class'] });
     }
 });
+
+// ============================================================================
+// STREAMHUB v3.1.0 — NEW FEATURES
+// ============================================================================
+
+// ── Fix: _showSeekOverlay using static HTML element ───────────────────────────
+// The overlay div is always inside .video-player-container (= the fullscreen
+// element), so it's guaranteed to be visible in both normal and fullscreen mode.
+{
+    let _seekOverlayTimer = null;
+    let _volOverlayTimer  = null;
+
+    window._showSeekOverlay = function(seconds) {
+        const overlay = document.getElementById('_seekOverlay');
+        if (!overlay) return;
+        const icon = seconds < 0 ? '◄◄' : '►►';
+        overlay.textContent = `${icon} ${seconds < 0 ? seconds : '+' + seconds}s`;
+        overlay.style.display = 'flex';
+        overlay.style.opacity = '1';
+        if (typeof overlay.showPopover === 'function') {
+            try { overlay.showPopover(); } catch(e) {}
+        }
+        clearTimeout(_seekOverlayTimer);
+        _seekOverlayTimer = setTimeout(() => {
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                overlay.style.display = 'none';
+                if (typeof overlay.hidePopover === 'function') {
+                    try { overlay.hidePopover(); } catch(e) {}
+                }
+            }, 280);
+        }, 900);
+    };
+
+    // Volume overlay (top-right corner of player) — uses static HTML element
+    window._showVolumeOverlay = function(vol) {
+        const overlay = document.getElementById('_volumeOverlay');
+        if (!overlay) return;
+        const pct = Math.round(vol * 100);
+        const icon = vol === 0 ? '🔇' : vol < 0.5 ? '🔉' : '🔊';
+        overlay.textContent = `${icon} ${pct}%`;
+        overlay.style.display = 'flex';
+        overlay.style.opacity = '1';
+        if (typeof overlay.showPopover === 'function') {
+            try { overlay.showPopover(); } catch(e) {}
+        }
+        clearTimeout(_volOverlayTimer);
+        _volOverlayTimer = setTimeout(() => {
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                overlay.style.display = 'none';
+                if (typeof overlay.hidePopover === 'function') {
+                    try { overlay.hidePopover(); } catch(e) {}
+                }
+            }, 280);
+        }, 1000);
+    };
+}
+
+// ── Extra Keyboard Shortcuts: ↑↓ Volume, M Mute, F Fullscreen, ? Shortcuts ──
+document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('keydown', (e) => {
+        // Ignore when typing in inputs
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' ||
+            active.tagName === 'SELECT' || active.isContentEditable)) return;
+
+        const vmEl = document.getElementById('videoModal');
+        const tcEl = document.getElementById('trailerPlayerContainer');
+        const vmOpen = vmEl && vmEl.classList.contains('active') &&
+                       (!tcEl || tcEl.style.display === 'none');
+        const vp = document.getElementById('videoPlayer');
+
+        // ↑ Volume up
+        if (e.key === 'ArrowUp' && vmOpen && vp) {
+            e.preventDefault(); e.stopPropagation();
+            vp.volume = Math.min(1, Math.round((vp.volume + 0.1) * 10) / 10);
+            window._showVolumeOverlay(vp.volume);
+            return;
+        }
+        // ↓ Volume down
+        if (e.key === 'ArrowDown' && vmOpen && vp) {
+            e.preventDefault(); e.stopPropagation();
+            vp.volume = Math.max(0, Math.round((vp.volume - 0.1) * 10) / 10);
+            window._showVolumeOverlay(vp.volume);
+            return;
+        }
+        // M — Mute/Unmute
+        if ((e.key === 'm' || e.key === 'M') && vmOpen && vp) {
+            e.preventDefault();
+            vp.muted = !vp.muted;
+            window._showVolumeOverlay(vp.muted ? 0 : vp.volume);
+            return;
+        }
+        // F — Toggle Fullscreen (same function as the Vollbild button)
+        if ((e.key === 'f' || e.key === 'F') && vmOpen && vp) {
+            e.preventDefault();
+            if (typeof window.toggleFullscreen === 'function') {
+                window.toggleFullscreen();
+            } else {
+                // Fallback if not yet initialised
+                if (document.fullscreenElement) {
+                    document.exitFullscreen().catch(() => {});
+                } else if (vp && vp.requestFullscreen) {
+                    vp.requestFullscreen().catch(() => {});
+                }
+            }
+            return;
+        }
+        // ? — Shortcut overlay (works anywhere)
+        if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+            e.preventDefault();
+            const so = document.getElementById('shortcutOverlay');
+            if (so) so.style.display = so.style.display === 'none' ? 'flex' : 'none';
+            return;
+        }
+    }, true);
+
+    // Close shortcut overlay
+    const closeBtn = document.getElementById('closeShortcutOverlay');
+    if (closeBtn) closeBtn.addEventListener('click', () => {
+        const so = document.getElementById('shortcutOverlay');
+        if (so) so.style.display = 'none';
+    });
+    const shortcutOverlay = document.getElementById('shortcutOverlay');
+    if (shortcutOverlay) {
+        shortcutOverlay.addEventListener('click', (e) => {
+            if (e.target === shortcutOverlay) shortcutOverlay.style.display = 'none';
+        });
+    }
+});
+
+// ── Sort Buttons ──────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    let currentSort = 'relevanz';
+
+    function applySort(sort) {
+        currentSort = sort;
+        // Update active button
+        document.querySelectorAll('.sort-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.sort === sort);
+        });
+        if (sort === 'relevanz') {
+            currentResults = [...originalResults];
+        } else if (sort === 'datum') {
+            currentResults = [...originalResults].sort((a, b) => {
+                return (b.timestamp || 0) - (a.timestamp || 0);
+            });
+        } else if (sort === 'dauer') {
+            currentResults = [...originalResults].sort((a, b) => {
+                return (b.duration || 0) - (a.duration || 0);
+            });
+        }
+        currentOffset = 0;
+        displayedResults = [];
+        displayResults();
+    }
+
+    document.querySelectorAll('.sort-btn').forEach(btn => {
+        btn.addEventListener('click', () => applySort(btn.dataset.sort));
+    });
+
+    // Show sort buttons & chips only during active search
+    const origPerformSearch = window.performSearch || null;
+    // Hook into displayResults to toggle sort visibility
+    const origDisplayResults = window.displayResults;
+
+    function updateSortVisibility() {
+        const sortBtns = document.getElementById('sortButtons');
+        if (sortBtns) {
+            sortBtns.style.display = currentQuery ? 'flex' : 'none';
+        }
+        // Reset sort when new search starts
+        if (currentSort !== 'relevanz' && currentQuery) {
+            // don't reset mid-sort; just keep current sort
+        }
+    }
+
+    // Patch displayResults to also update sort buttons visibility
+    const _origDisplay = displayResults;
+    window.displayResults = function() {
+        _origDisplay();
+        updateSortVisibility();
+        renderSearchChips();
+    };
+});
+
+// ── Android PiP Bounds Calculator ──────────────────────────────────────────
+window._updateAndroidPipBounds = function() {
+    if (!window.AndroidNativeTheme || !window.AndroidNativeTheme.updatePipSourceRect) return;
+    const vp = document.getElementById('videoPlayer');
+    if (!vp) return;
+    const r = vp.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const left = Math.round(r.left * dpr);
+    const top = Math.round(r.top * dpr);
+    const right = Math.round(r.right * dpr);
+    const bottom = Math.round(r.bottom * dpr);
+    const aw = vp.videoWidth || 16;
+    const ah = vp.videoHeight || 9;
+    try {
+        window.AndroidNativeTheme.updatePipSourceRect(left, top, right, bottom, aw, ah);
+    } catch(e) {}
+};
+window.addEventListener('resize', () => {
+    if (typeof window._updateAndroidPipBounds === 'function') window._updateAndroidPipBounds();
+});
+
+// ── Miniplayer ────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    const minimizeBtn    = document.getElementById('minimizeModal');
+    const videoModal     = document.getElementById('videoModal');
+    const miniRestoreBtn = document.getElementById('miniRestoreBtn');
+    if (!videoModal) return;
+
+    // ── Miniplayer minimize / restore ─────────────────────────────────────────
+    if (!minimizeBtn) return;
+
+    minimizeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+        }
+        videoModal.classList.add('modal-minimized');
+        setTimeout(() => { if (typeof window._updateAndroidPipBounds === 'function') window._updateAndroidPipBounds(); }, 120);
+    });
+
+    // Dedicated restore button (always visible in miniplayer)
+    if (miniRestoreBtn) {
+        miniRestoreBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            videoModal.classList.add('modal-restoring');
+            videoModal.classList.remove('modal-minimized');
+            setTimeout(() => { if (typeof window._updateAndroidPipBounds === 'function') window._updateAndroidPipBounds(); }, 120);
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                videoModal.classList.remove('modal-restoring');
+            }));
+        });
+    }
+
+    // Clicking modal-content also restores (fallback)
+    const mc = videoModal.querySelector('.modal-content');
+    if (mc) {
+        mc.addEventListener('click', (e) => {
+            if (!videoModal.classList.contains('modal-minimized')) return;
+            if (e.target.closest('.modal-close')) return;
+            if (e.target.closest('#miniRestoreBtn')) return;
+            e.stopPropagation();
+            videoModal.classList.add('modal-restoring');
+            videoModal.classList.remove('modal-minimized');
+            setTimeout(() => { if (typeof window._updateAndroidPipBounds === 'function') window._updateAndroidPipBounds(); }, 120);
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                videoModal.classList.remove('modal-restoring');
+            }));
+        });
+    }
+
+    // Auto-restore if fullscreen entered while minimized
+    document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement && videoModal.classList.contains('modal-minimized')) {
+            videoModal.classList.remove('modal-minimized');
+        }
+    });
+
+    // Clear minimized on close (guard against double-wrap)
+    if (!window._miniplayerClosePatched) {
+        window._miniplayerClosePatched = true;
+        const _origClose = window.closeVideoModal;
+        window.closeVideoModal = function(...args) {
+            videoModal.classList.remove('modal-minimized');
+            if (typeof _origClose === 'function') return _origClose(...args);
+        };
+    }
+});
+
+
+
+function renderSearchChips() {
+    const chipsRow = document.getElementById('searchChipsRow');
+    if (!chipsRow) return;
+
+    let history = [];
+    try {
+        history = JSON.parse(localStorage.getItem(getProfileKey('streamhubSearchHistory')) || '[]');
+    } catch(e) {}
+
+    // Only show if we have history and we're on search results
+    if (!history.length || !currentQuery) {
+        chipsRow.style.display = 'none';
+        return;
+    }
+
+    // Show last 6 searches, exclude the current query
+    const recent = history.filter(q => q !== currentQuery).slice(0, 6);
+    if (!recent.length) { chipsRow.style.display = 'none'; return; }
+
+    chipsRow.innerHTML = `<span class="search-chip-label"><i class="fas fa-history"></i></span>` +
+        recent.map(q => `<button class="search-chip" data-q="${encodeURIComponent(q)}">
+            <i class="fas fa-clock"></i>${q}
+        </button>`).join('');
+    chipsRow.style.display = 'flex';
+
+    chipsRow.querySelectorAll('.search-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            const q = decodeURIComponent(chip.dataset.q);
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) {
+                searchInput.value = q;
+                searchInput.dispatchEvent(new Event('input'));
+            }
+            performSearch(q);
+        });
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => renderSearchChips());
+
+// ── Landscape Auto-Fullscreen (Android) ───────────────────────────────────────
+// When the device is rotated to landscape while a video is playing → auto fullscreen.
+// Rotate back to portrait → exit fullscreen.
+(function initLandscapeFullscreen() {
+    const orientationTarget = window.screen && window.screen.orientation
+        ? window.screen.orientation
+        : window;
+    const evtName = window.screen && window.screen.orientation
+        ? 'change' : 'orientationchange';
+
+    orientationTarget.addEventListener(evtName, () => {
+        const vp = document.getElementById('videoPlayer');
+        const vm = document.getElementById('videoModal');
+        if (!vp || !vm || !vm.classList.contains('active') || !vp.src) return;
+
+        // Determine orientation
+        let isLandscape = false;
+        if (window.screen && window.screen.orientation) {
+            isLandscape = window.screen.orientation.type.includes('landscape');
+        } else {
+            isLandscape = Math.abs(window.orientation) === 90;
+        }
+
+        if (isLandscape && !document.fullscreenElement) {
+            const container = vp.closest('.video-player-container') || vp.parentElement;
+            if (container && container.requestFullscreen) {
+                container.requestFullscreen().catch(() => {});
+            }
+        } else if (!isLandscape && document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+        }
+    });
+})();
+
+// ── Ähnliche Videos ───────────────────────────────────────────────────────────
+// After opening a video, fetch related videos (same topic/sender) and show them.
+async function loadSimilarVideos(topic, sender, excludeUrl) {
+    const section = document.getElementById('similarVideosSection');
+    const grid    = document.getElementById('similarVideosGrid');
+    if (!section || !grid) return;
+
+    const query = topic || sender;
+    if (!query) { section.style.display = 'none'; return; }
+
+    try {
+        const body = JSON.stringify({
+            queries: [{ fields: ['topic', 'title'], query }],
+            future: false,
+            offset: 0,
+            size: 8,
+            order: 'timestamp'
+        });
+        const res  = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body
+        });
+        const data = await res.json();
+        let results = (data.result?.results || [])
+            .filter(v => {
+                const vUrl = v.url_video_hd || v.url_video || v.url || '';
+                return vUrl !== excludeUrl && (v.url_video || v.url_video_hd);
+            })
+            .slice(0, 6);
+
+        if (!results.length) { section.style.display = 'none'; return; }
+
+        grid.innerHTML = '';
+        results.forEach(video => {
+            const card = document.createElement('div');
+            card.className = 'video-card';
+            card.style.cursor = 'pointer';
+            const dur = video.duration ? formatDuration(video.duration) : '';
+            const ch  = video.channel  || video.sender || '';
+            card.innerHTML = `
+                <div class="video-thumbnail" style="background:linear-gradient(135deg,#1e1e3f,#2d2d5e);">
+                    <div class="play-overlay"><i class="fas fa-play"></i></div>
+                    ${dur ? `<span class="duration-badge">${dur}</span>` : ''}
+                </div>
+                <div class="video-info">
+                    <div class="video-title">${video.title || 'Unbekannt'}</div>
+                    ${ch ? `<div class="video-channel">${ch}</div>` : ''}
+                </div>`;
+            card.addEventListener('click', () => playVideo(video));
+            grid.appendChild(card);
+        });
+        section.style.display = 'block';
+    } catch(e) {
+        console.warn('Similar videos load failed:', e);
+        section.style.display = 'none';
+    }
+}
+
+// Hook into video modal via MutationObserver (playVideo has no hookable wrapper)
+document.addEventListener('DOMContentLoaded', () => {
+    let _simVideoLastActive = false;
+    const _vmEl = document.getElementById('videoModal');
+    if (!_vmEl) { console.warn('[SimilarVideos] #videoModal not found'); return; }
+
+    new MutationObserver(() => {
+        const isActive = _vmEl.classList.contains('active');
+        if (isActive && !_simVideoLastActive) {
+            // Modal just opened — load similar videos
+            setTimeout(() => {
+                const item = window.currentPlayingVideo;
+                console.log('[SimilarVideos] modal opened, item:', item && item.topic);
+                if (item) {
+                    const excludeUrl = item.url_video_hd || item.url_video || item.url || '';
+                    loadSimilarVideos(item.topic, item.channel || item.sender, excludeUrl);
+                }
+            }, 600);
+        } else if (!isActive) {
+            // Modal closed — hide similar videos section
+            const section = document.getElementById('similarVideosSection');
+            if (section) section.style.display = 'none';
+        }
+        _simVideoLastActive = isActive;
+    }).observe(_vmEl, { attributes: true, attributeFilter: ['class'] });
+});
+

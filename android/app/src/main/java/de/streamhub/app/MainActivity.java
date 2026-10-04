@@ -158,6 +158,38 @@ public class MainActivity extends BridgeActivity {
                         });
                     }
 
+                    // Update PiP SourceRectHint — tells Android exactly where the video is
+                    // so the PiP floating window crops only the video, not the rest of the app!
+                    @android.webkit.JavascriptInterface
+                    public void updatePipSourceRect(int left, int top, int right, int bottom, int aspectWidth, int aspectHeight) {
+                        runOnUiThread(() -> {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                try {
+                                    PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
+                                    if (aspectWidth > 0 && aspectHeight > 0) {
+                                        float r = (float) aspectWidth / (float) aspectHeight;
+                                        if (r >= 0.41841f && r <= 2.39f) {
+                                            builder.setAspectRatio(new Rational(aspectWidth, aspectHeight));
+                                        } else {
+                                            builder.setAspectRatio(new Rational(16, 9));
+                                        }
+                                    } else {
+                                        builder.setAspectRatio(new Rational(16, 9));
+                                    }
+                                    if (right > left && bottom > top) {
+                                        builder.setSourceRectHint(new android.graphics.Rect(left, top, right, bottom));
+                                    }
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                        builder.setAutoEnterEnabled(true);
+                                    }
+                                    List<RemoteAction> actions = buildPipActions();
+                                    if (!actions.isEmpty()) builder.setActions(actions);
+                                    setPictureInPictureParams(builder.build());
+                                } catch (Exception e) { e.printStackTrace(); }
+                            }
+                        });
+                    }
+
                     // Native Android Picture-in-Picture mode trigger
                     @android.webkit.JavascriptInterface
                     public void enterPip() {
@@ -386,7 +418,13 @@ public class MainActivity extends BridgeActivity {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
         _isInPip = isInPictureInPictureMode;
         WebView webView = getBridge().getWebView();
-        if (!isInPictureInPictureMode) {
+        if (isInPictureInPictureMode) {
+            registerPipReceiver();
+            if (webView != null) {
+                webView.evaluateJavascript(
+                    "document.body.classList.add('in-pip-mode'); void 0;", null);
+            }
+        } else {
             // EXIT: restore UI
             unregisterPipReceiver();
             if (webView != null) {

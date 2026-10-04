@@ -640,8 +640,15 @@
                 <h2 id="sectionTitle"><i class="fas fa-fire"></i> Aktuelle Highlights</h2>
                 <div class="results-info">
                     <span id="resultsCount"></span>
+                    <div id="sortButtons" class="sort-buttons" style="display:none;">
+                        <button class="sort-btn active" data-sort="relevanz"><i class="fas fa-star"></i> Relevanz</button>
+                        <button class="sort-btn" data-sort="datum"><i class="fas fa-calendar-alt"></i> Datum</button>
+                        <button class="sort-btn" data-sort="dauer"><i class="fas fa-clock"></i> Dauer</button>
+                    </div>
                 </div>
             </div>
+            <!-- Search history chips (shown while searching) -->
+            <div id="searchChipsRow" class="search-chips-row" style="display:none;"></div>
             
             <div id="loadingState" class="loading-state">
                 <div class="spinner"></div>
@@ -780,6 +787,9 @@
             <button class="modal-close" id="closeModal">
                 <i class="fas fa-times"></i>
             </button>
+            <button class="modal-minimize" id="minimizeModal" title="Miniplayer">
+                <i class="fas fa-compress-alt"></i>
+            </button>
             
             <div class="video-player-container">
                 <video id="videoPlayer" controls>
@@ -789,6 +799,13 @@
                     <iframe id="trailerPlayer" src="" style="width:100%; height:100%; border:none;" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media" allowfullscreen></iframe>
                     <button id="closeTrailerBtn" class="action-btn" style="position:absolute; top:10px; right:10px; z-index:11; background:rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.2);"><i class="fas fa-times"></i> Trailer schließen</button>
                 </div>
+                <!-- Seek/volume overlays — popover="manual" allows rendering in the browser Top Layer over fullscreen video -->
+                <div id="_seekOverlay" popover="manual" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.85);color:#fff;font-size:1.6rem;font-weight:800;padding:14px 32px;border:none;border-radius:18px;pointer-events:none;z-index:99999;white-space:nowrap;letter-spacing:0.02em;box-shadow:0 4px 24px rgba(0,0,0,0.6);backdrop-filter:blur(8px);transition:opacity 0.25s ease;align-items:center;gap:10px;"></div>
+                <div id="_volumeOverlay" popover="manual" style="display:none;position:fixed;top:20px;right:20px;background:rgba(0,0,0,0.85);color:#fff;font-size:1.1rem;font-weight:700;padding:10px 20px;border:none;border-radius:14px;pointer-events:none;z-index:99999;white-space:nowrap;box-shadow:0 2px 16px rgba(0,0,0,0.5);backdrop-filter:blur(6px);transition:opacity 0.25s ease;align-items:center;gap:8px;"></div>
+                <!-- Miniplayer restore button (only visible when minimized) -->
+                <button id="miniRestoreBtn" title="Erweitern" aria-label="Miniplayer erweitern">
+                    <i class="fas fa-expand-alt"></i>
+                </button>
             </div>
             
             <div class="video-details">
@@ -870,11 +887,46 @@
                     </button>
                 </div>
             </div>
+            <!-- Ähnliche Videos -->
+            <div id="similarVideosSection" class="similar-videos-section" style="display:none;">
+                <h3 class="similar-title"><i class="fas fa-layer-group"></i> Ähnliche Videos</h3>
+                <div class="video-grid similar-grid" id="similarVideosGrid"></div>
+            </div>
         </div>
     </div>
     <!-- Sidebar Backdrop Overlay -->
     <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
 
+    <!-- Keyboard Shortcut Overlay -->
+    <div id="shortcutOverlay" class="shortcut-overlay" style="display:none;">
+        <div class="shortcut-box">
+            <div class="shortcut-header">
+                <h3><i class="fas fa-keyboard"></i> Tastaturkürzel</h3>
+                <button id="closeShortcutOverlay" class="close-btn">&times;</button>
+            </div>
+            <div class="shortcut-grid">
+                <div class="shortcut-group">
+                    <div class="shortcut-group-title">Wiedergabe</div>
+                    <div class="shortcut-row"><kbd>Leertaste</kbd><span>Play / Pause</span></div>
+                    <div class="shortcut-row"><kbd>←</kbd><span>10 Sekunden zurück</span></div>
+                    <div class="shortcut-row"><kbd>→</kbd><span>10 Sekunden vor</span></div>
+                    <div class="shortcut-row"><kbd>↑</kbd><span>Lautstärke +10%</span></div>
+                    <div class="shortcut-row"><kbd>↓</kbd><span>Lautstärke -10%</span></div>
+                    <div class="shortcut-row"><kbd>M</kbd><span>Muten / Unmuten</span></div>
+                    <div class="shortcut-row"><kbd>F</kbd><span>Vollbild</span></div>
+                </div>
+                <div class="shortcut-group">
+                    <div class="shortcut-group-title">Navigation</div>
+                    <div class="shortcut-row"><kbd>Esc</kbd><span>Zurück / Schließen</span></div>
+                    <div class="shortcut-row"><kbd>Alt + ←</kbd><span>Vorherige Seite</span></div>
+                    <div class="shortcut-row"><kbd>F5</kbd><span>Seite neu laden</span></div>
+                    <div class="shortcut-row"><kbd>?</kbd><span>Dieses Fenster</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="renderer.js"></script>
 </body>
+
 </html>

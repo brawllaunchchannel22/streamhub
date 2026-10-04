@@ -1128,9 +1128,8 @@ select option, .setting-select option, .quality-selector option, .filter-section
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.92);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
+    background: rgba(0, 0, 0, 0.93);
+    /* backdrop-filter removed: extremely GPU-heavy on integrated graphics */
     z-index: -1;
 }
 
@@ -1145,6 +1144,13 @@ select option, .setting-select option, .quality-selector option, .filter-section
     box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85);
     animation: modalSlideIn 0.3s ease;
     overflow: hidden;
+    will-change: transform;          /* promote to GPU layer */
+}
+
+/* Suppress animation replay when restoring from miniplayer */
+#videoModal.modal-restoring .modal-content {
+    animation: none !important;
+    transition: none !important;
 }
 
 @keyframes modalSlideIn {
@@ -1193,6 +1199,136 @@ select option, .setting-select option, .quality-selector option, .filter-section
     max-height: 70vh;
     display: block;
 }
+
+/* Remove focus ring from video element (caused orange/white outline bug) */
+video:focus,
+video:focus-visible {
+    outline: none !important;
+}
+
+
+/* ── Popover styling for Top-Layer Overlays (visible in normal and fullscreen) */
+#_seekOverlay:popover-open {
+    display: flex !important;
+}
+#_volumeOverlay:popover-open {
+    display: flex !important;
+}
+
+/* ── Miniplayer restore button ────────────────────────────────────────────── */
+#miniRestoreBtn {
+    display: none;
+    position: absolute;
+    top: 0.4rem;
+    left: 0.4rem;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    color: #fff;
+    font-size: 0.85rem;
+    cursor: pointer;
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+#miniRestoreBtn:hover { background: rgba(99, 102, 241, 0.85); }
+#videoModal.modal-minimized #miniRestoreBtn { display: flex !important; }
+
+/* ── Minimize button (beside modal close) ─────────────────────────────────── */
+.modal-minimize {
+    position: absolute;
+    top: 1rem;
+    right: 3.6rem;
+    width: 40px;
+    height: 40px;
+    background: rgba(0, 0, 0, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    color: white;
+    font-size: 1.05rem;
+    cursor: pointer;
+    z-index: 1001 !important;
+    pointer-events: auto !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s;
+}
+.modal-minimize:hover {
+    background: var(--primary-color);
+    transform: scale(1.1);
+}
+
+/* ── Miniplayer (modal-minimized state) ───────────────────────────────────── */
+#videoModal.modal-minimized {
+    pointer-events: none !important;
+    overflow: visible !important;
+    background: transparent !important;
+}
+#videoModal.modal-minimized .modal-backdrop {
+    display: none !important;
+}
+#videoModal.modal-minimized .video-details,
+#videoModal.modal-minimized #similarVideosSection,
+#videoModal.modal-minimized .modal-minimize {
+    display: none !important;
+}
+#videoModal.modal-minimized .modal-content {
+    position: fixed !important;
+    bottom: 24px !important;
+    right: 20px !important;
+    left: auto !important;
+    top: auto !important;
+    width: 280px !important;
+    max-width: calc(100vw - 32px) !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 14px !important;
+    overflow: hidden !important;
+    z-index: 99999 !important;
+    animation: none !important;
+    background: #000 !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    box-shadow: 0 10px 35px rgba(0, 0, 0, 0.8) !important;
+    pointer-events: auto !important;
+    cursor: pointer;
+}
+#videoModal.modal-minimized .video-player-container {
+    position: relative !important;
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 16 / 9;
+    background: #000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 14px !important;
+    overflow: hidden !important;
+}
+#videoModal.modal-minimized .video-player-container video {
+    width: 100% !important;
+    height: 100% !important;
+    max-height: none !important;
+    object-fit: cover !important;
+    border-radius: 14px !important;
+}
+#videoModal.modal-minimized .modal-close {
+    top: 6px !important;
+    right: 6px !important;
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 0.85rem !important;
+    background: rgba(0, 0, 0, 0.75) !important;
+    border: 1px solid rgba(255, 255, 255, 0.25) !important;
+    z-index: 10001 !important;
+}
+
 
 .video-details {
     padding: 1.75rem 2rem 3rem 2rem;
@@ -2778,12 +2914,31 @@ select option, .setting-select option, .quality-selector option, .filter-section
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
+    position: relative !important;  /* so position:absolute children work correctly */
 }
 
 .video-player-container:fullscreen video {
     max-height: 100vh !important;
     width: 100% !important;
     height: 100% !important;
+    object-fit: contain;
+}
+
+/* Overlays inside fullscreen container */
+.video-player-container:fullscreen #_seekOverlay,
+.video-player-container:fullscreen #_volumeOverlay {
+    position: absolute !important;
+    z-index: 9999 !important;
+}
+.video-player-container:fullscreen #_seekOverlay {
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+}
+.video-player-container:fullscreen #_volumeOverlay {
+    top: 20px !important;
+    right: 20px !important;
+    bottom: auto !important;
 }
 
 /* ===== ABONNEMENTS ===== */
@@ -3342,27 +3497,71 @@ body.in-pip-mode #videoModal {
     margin: 0 !important;
 }
 
+body.in-pip-mode > *:not(#videoModal) {
+    display: none !important;
+}
+
+body.in-pip-mode {
+    background: #000 !important;
+    overflow: hidden !important;
+}
+
+body.in-pip-mode #videoModal {
+    display: block !important;
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    background: #000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    z-index: 9999999 !important;
+    overflow: hidden !important;
+    pointer-events: auto !important;
+}
+
 body.in-pip-mode #videoModal .modal-backdrop,
 body.in-pip-mode #videoModal .video-details,
 body.in-pip-mode #videoModal .modal-close,
+body.in-pip-mode #videoModal .modal-minimize,
+body.in-pip-mode #videoModal #miniRestoreBtn,
 body.in-pip-mode #videoModal .video-meta,
-body.in-pip-mode #videoModal .video-actions {
+body.in-pip-mode #videoModal .video-actions,
+body.in-pip-mode #videoModal #similarVideosSection,
+body.in-pip-mode #videoModal #_seekOverlay,
+body.in-pip-mode #videoModal #_volumeOverlay {
     display: none !important;
 }
 
 body.in-pip-mode #videoModal .modal-content {
-    padding: 0 !important;
-    margin: 0 !important;
-    max-width: 100vw !important;
-    max-height: 100vh !important;
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
     width: 100vw !important;
     height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    padding: 0 !important;
+    margin: 0 !important;
     background: #000 !important;
     border-radius: 0 !important;
     border: none !important;
+    box-shadow: none !important;
+    animation: none !important;
 }
 
 body.in-pip-mode #videoModal .video-player-container {
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
     width: 100vw !important;
     height: 100vh !important;
     max-width: 100vw !important;
@@ -3370,13 +3569,16 @@ body.in-pip-mode #videoModal .video-player-container {
     border-radius: 0 !important;
     padding: 0 !important;
     margin: 0 !important;
+    background: #000 !important;
     box-shadow: none !important;
 }
 
 body.in-pip-mode #videoModal video {
     width: 100vw !important;
     height: 100vh !important;
+    max-height: 100vh !important;
     object-fit: contain !important;
+    background: #000 !important;
 }
 
 /* ─── Card Context Menu Dialog Card ───────────────────────────────────────── */
@@ -3777,4 +3979,179 @@ body.in-pip-mode #videoModal video {
         font-size: 0.82rem;
         padding: 8px 12px;
     }
+}
+
+/* ── Sort Buttons ─────────────────────────────────────────────────────────── */
+.sort-buttons {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.sort-btn {
+    padding: 5px 12px;
+    border-radius: 100px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.06);
+    color: var(--text-secondary, #94a3b8);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.sort-btn:hover {
+    background: rgba(255,255,255,0.12);
+    color: var(--text-primary, #fff);
+}
+.sort-btn.active {
+    background: var(--accent, #6366f1);
+    border-color: var(--accent, #6366f1);
+    color: #fff;
+}
+
+/* ── Search Chips ─────────────────────────────────────────────────────────── */
+.search-chips-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 0 12px 0;
+    align-items: center;
+}
+.search-chip-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #94a3b8);
+    margin-right: 2px;
+}
+.search-chip {
+    padding: 5px 12px;
+    border-radius: 100px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.06);
+    color: var(--text-secondary, #94a3b8);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+.search-chip:hover {
+    background: rgba(99,102,241,0.18);
+    border-color: rgba(99,102,241,0.5);
+    color: #fff;
+}
+.search-chip i { font-size: 0.7rem; opacity: 0.7; }
+
+/* ── Keyboard Shortcut Overlay ────────────────────────────────────────────── */
+.shortcut-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    backdrop-filter: blur(4px);
+}
+.shortcut-box {
+    background: var(--modal-bg, #1a1a2e);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 28px;
+    max-width: 640px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+.shortcut-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+.shortcut-header h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary, #fff);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+}
+.shortcut-header h3 i { color: var(--accent, #6366f1); }
+.shortcut-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+}
+@media (max-width: 500px) { .shortcut-grid { grid-template-columns: 1fr; } }
+.shortcut-group-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent, #6366f1);
+    margin-bottom: 10px;
+}
+.shortcut-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-size: 0.85rem;
+    color: var(--text-secondary, #94a3b8);
+}
+.shortcut-row span { flex: 1; }
+kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    padding: 3px 8px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-bottom: 2px solid rgba(255,255,255,0.25);
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-primary, #fff);
+    white-space: nowrap;
+}
+
+/* ── Similar Videos ───────────────────────────────────────────────────────── */
+.similar-videos-section {
+    padding: 1.5rem 2rem 2rem;
+    border-top: 1px solid rgba(255,255,255,0.07);
+}
+.similar-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary, #fff);
+    margin: 0 0 1rem 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.similar-title i { color: var(--accent, #6366f1); }
+.similar-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+/* ── Seek and Volume Overlays ────────────────────────────────────────────── */
+/* Both overlays live inside .video-player-container. Since the container is
+   the fullscreen element, position:absolute works correctly in all modes.    */
+#_seekOverlay, #_volumeOverlay {
+    position: absolute;
+    pointer-events: none;
+    z-index: 9999;
+    transition: opacity 0.25s ease;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }

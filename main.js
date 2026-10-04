@@ -15,6 +15,16 @@ if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 // ─── Custom protocol: streamhub-file://  ────────────────────────────────────
 // Electron blocks renderer-side access to file:// in secure context.
 // We register our own scheme so the renderer can load local videos/images.
+
+// ─── GPU / Rendering performance flags (helps on Ubuntu with integrated GPU) ──
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('disable-software-rasterizer');
+// Reduce CPU overhead for animations
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+
 app.whenReady().then(() => {
     protocol.handle('streamhub-file', (request) => {
         // URL looks like: streamhub-file:///home/user/video.mp4
@@ -35,20 +45,23 @@ function createWindow() {
         minWidth: 1200,
         minHeight: 800,
         backgroundColor: '#0f0f0f',
-        fullscreen: false,      // start maximized, not true-fullscreen (no title bar)
+        show: false,            // hide until ready-to-show fires (no white flash)
+        fullscreen: false,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
             webSecurity: false,
-            // Allow the custom protocol in the renderer
             additionalArguments: []
         },
         autoHideMenuBar: true,
         icon: path.join(__dirname, 'assets', 'icon.png')
     });
 
-    win.maximize();
+    win.once('ready-to-show', () => {
+        win.maximize();
+        win.show();
+    });
 
     win.webContents.session.webRequest.onBeforeSendHeaders(
         { urls: ['*://*.youtube.com/*', '*://*.youtube-nocookie.com/*'] },
@@ -65,7 +78,6 @@ function createWindow() {
     if (isDev) {
         win.webContents.openDevTools();
     }
-
     return win;
 }
 
