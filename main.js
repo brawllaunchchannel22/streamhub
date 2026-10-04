@@ -24,6 +24,8 @@ app.commandLine.appendSwitch('disable-software-rasterizer');
 // Reduce CPU overhead for animations
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
+// Avoid /dev/shm permission / size issues in VM / snap environments
+app.commandLine.appendSwitch('disable-dev-shm-usage');
 
 app.whenReady().then(() => {
     protocol.handle('streamhub-file', (request) => {

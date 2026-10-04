@@ -9,14 +9,15 @@ description: |
 grade: stable
 confinement: strict
 
-icon: build/icon.png
+icon: snap/gui/icon.png
 
 architectures:
   - build-on: amd64
 
 apps:
   streamhub:
-    command: opt/streamhub/streamhub --no-sandbox
+    command: opt/streamhub/streamhub --no-sandbox --disable-dev-shm-usage
+    desktop: snap/gui/streamhub.desktop
     extensions: [gnome]
     plugs:
       - network
@@ -25,6 +26,7 @@ apps:
       - opengl
       - x11
       - wayland
+      - browser-support
 
 parts:
   streamhub:
@@ -39,6 +41,3 @@ parts:
     override-build: |
       mkdir -p $CRAFT_PART_INSTALL/opt/streamhub
       cp -r dist/linux-unpacked/* $CRAFT_PART_INSTALL/opt/streamhub/
-
-
-
