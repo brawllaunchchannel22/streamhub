@@ -30,7 +30,15 @@ jobs:
         uses: snapcore/action-build@v1
         id: build
 
-      - name: Publish Snap
+      - name: Upload Snap to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.event_name == 'release'
+        with:
+          files: ${{ steps.build.outputs.snap }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Snap to Snapcraft Store
         uses: snapcore/action-publish@v1
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
