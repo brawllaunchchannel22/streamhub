@@ -394,35 +394,39 @@ function deleteProfile(profileId) {
     const target = profiles.find(p => p.id === profileId);
     if (!target) return;
     
-    if (!confirm(`Möchtest du das Profil „${target.name}“ und alle zugehörigen Daten wirklich löschen?`)) {
-        return;
-    }
-    
-    // Remove profile-specific storage keys
-    const profileKeys = [
-        'streamhubWatchlist',
-        'streamhubWatchLater',
-        'streamhubPlaylists',
-        'recentlyWatched',
-        'videoProgressMap',
-        'streamhubSearchHistory',
-        'streamhub_abos'
-    ];
-    profileKeys.forEach(k => {
-        localStorage.removeItem(`sh_p_${profileId}_${k}`);
-    });
-    
-    profiles = profiles.filter(p => p.id !== profileId);
-    saveProfiles(profiles);
-    
-    if (getActiveProfileId() === profileId) {
-        switchActiveProfile('default', true);
-    }
-    
-    showNotification(`Profil „${target.name}“ wurde gelöscht.`, 'info');
-    renderModalProfilesGrid();
-    renderProfileSettingsList();
-    updateProfileUI();
+    _showConfirmDialog(
+        'Profil löschen?',
+        `Möchtest du das Profil „${target.name}“ und alle zugehörigen Daten wirklich löschen?`,
+        () => {
+            // Remove profile-specific storage keys
+            const profileKeys = [
+                'streamhubWatchlist',
+                'streamhubWatchLater',
+                'streamhubPlaylists',
+                'recentlyWatched',
+                'videoProgressMap',
+                'streamhubSearchHistory',
+                'streamhub_abos'
+            ];
+            profileKeys.forEach(k => {
+                localStorage.removeItem(`sh_p_${profileId}_${k}`);
+            });
+
+            profiles = profiles.filter(p => p.id !== profileId);
+            saveProfiles(profiles);
+
+            if (getActiveProfileId() === profileId) {
+                switchActiveProfile('default', true);
+            }
+
+            showNotification(`Profil „${target.name}“ wurde gelöscht.`, 'info');
+            renderModalProfilesGrid();
+            renderProfileSettingsList();
+            updateProfileUI();
+        },
+        'Löschen',
+        true
+    );
 }
 
 // ── Export & Import Engine ──────────────────────────────────────────────────
@@ -643,7 +647,8 @@ function importStreamHubDataFromFile(file) {
             _showConfirmDialog(
                 `Backup importieren?`,
                 `Erstellt am: ${dateStr}\n\nBestehende Profile bleiben erhalten, neue Profile aus dem Backup werden hinzugefügt.`,
-                () => _doImport(backup)
+                () => _doImport(backup),
+                'Importieren'
             );
         } catch(err) {
             console.error('Import parse error:', err);
@@ -717,7 +722,7 @@ function _doImport(backup) {
 }
 
 // Android-safe confirm dialog (window.confirm is blocked in WebView)
-function _showConfirmDialog(title, message, onConfirm) {
+function _showConfirmDialog(title, message, onConfirm, confirmLabel = 'Bestätigen', isDanger = false) {
     // Try native confirm first (works on desktop/Electron)
     try {
         if (typeof window.confirm === 'function' && !/android/i.test(navigator.userAgent) && typeof Capacitor === 'undefined') {
@@ -729,17 +734,21 @@ function _showConfirmDialog(title, message, onConfirm) {
     // Custom modal for Android
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:999999;display:flex;align-items:center;justify-content:center;padding:1.5rem;';
+    const btnBg = isDanger
+        ? 'linear-gradient(135deg,#dc2626,#ef4444)'
+        : 'linear-gradient(135deg,#4f46e5,#6366f1)';
     overlay.innerHTML = `
         <div style="background:#1e1e2e;border-radius:20px;padding:28px;max-width:480px;width:100%;border:1px solid rgba(255,255,255,0.1);">
             <h3 style="margin:0 0 12px;color:#fff;font-size:1.1rem;">${title}</h3>
             <p style="color:#94a3b8;font-size:0.9rem;white-space:pre-line;margin-bottom:24px;">${message}</p>
             <div style="display:flex;gap:12px;justify-content:flex-end;">
                 <button id="_confirmNo" style="padding:10px 20px;background:rgba(255,255,255,0.08);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);border-radius:100px;cursor:pointer;font-size:0.9rem;">Abbrechen</button>
-                <button id="_confirmYes" style="padding:10px 22px;background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;border:none;border-radius:100px;cursor:pointer;font-size:0.9rem;font-weight:600;">Importieren</button>
+                <button id="_confirmYes" style="padding:10px 22px;background:${btnBg};color:#fff;border:none;border-radius:100px;cursor:pointer;font-size:0.9rem;font-weight:600;">${confirmLabel}</button>
             </div>
         </div>
     `;
     document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     overlay.querySelector('#_confirmNo').onclick = () => overlay.remove();
     overlay.querySelector('#_confirmYes').onclick = () => { overlay.remove(); onConfirm(); };
 }
@@ -1256,8 +1265,13 @@ function openCardContextMenu(item, cardEl, event) {
 
     document.body.appendChild(backdrop);
     document.body.appendChild(menu);
+    if (window._syncNativeBackHandler) window._syncNativeBackHandler();
 
-    const closeCtx = () => { backdrop.remove(); menu.remove(); };
+    const closeCtx = () => {
+        backdrop.remove();
+        menu.remove();
+        if (window._syncNativeBackHandler) window._syncNativeBackHandler();
+    };
     backdrop.onclick = closeCtx;
     menu.querySelector('.ctx-cancel').onclick = closeCtx;
 
@@ -1302,10 +1316,16 @@ function loadWatchlistPage() {
 }
 
 function clearWatchlist() {
-    if (confirm('Merkliste wirklich leeren?')) {
-        localStorage.removeItem(getProfileKey('streamhubWatchlist'));
-        loadWatchlistPage();
-    }
+    _showConfirmDialog(
+        'Merkliste leeren?',
+        'Möchtest du die Merkliste wirklich leeren?',
+        () => {
+            localStorage.removeItem(getProfileKey('streamhubWatchlist'));
+            loadWatchlistPage();
+        },
+        'Leeren',
+        true
+    );
 }
 
 // ── Watch Later Page ──────────────────────────────────────────────────────────
@@ -1320,10 +1340,16 @@ function loadWatchLaterPage() {
     
     if (clearBtn) {
         clearBtn.onclick = () => {
-            if (confirm('„Später ansehen" Liste wirklich leeren?')) {
-                localStorage.removeItem(getProfileKey('streamhubWatchLater'));
-                loadWatchLaterPage();
-            }
+            _showConfirmDialog(
+                '„Später ansehen“ leeren?',
+                'Möchtest du die „Später ansehen“-Liste wirklich leeren?',
+                () => {
+                    localStorage.removeItem(getProfileKey('streamhubWatchLater'));
+                    loadWatchLaterPage();
+                },
+                'Leeren',
+                true
+            );
         };
     }
     if (backBtn) {
@@ -1402,11 +1428,17 @@ function loadPlaylistsPage() {
         if (delBtn) {
             delBtn.onclick = (e) => {
                 e.stopPropagation();
-                if (confirm(`Playlist „${pl.title}“ wirklich löschen?`)) {
-                    const all = getPlaylists().filter(p => p.id !== pl.id);
-                    savePlaylists(all);
-                    loadPlaylistsPage();
-                }
+                _showConfirmDialog(
+                    'Playlist löschen?',
+                    `Möchtest du die Playlist „${pl.title}“ wirklich löschen?`,
+                    () => {
+                        const all = getPlaylists().filter(p => p.id !== pl.id);
+                        savePlaylists(all);
+                        loadPlaylistsPage();
+                    },
+                    'Löschen',
+                    true
+                );
             };
         }
 
@@ -1854,13 +1886,15 @@ function attachEventListeners() {
                 const sections = [
                     'mainVideoSection', 'historyPage', 'recentlyWatched', 'livePage',
                     'localPage', 'localFolderDetailPage', 'seriesDetailPage',
-                    'settingsPage', 'watchlistPage', 'statsPage', 'abosPage', 'downloadsPage'
+                    'settingsPage', 'watchlistPage', 'watchLaterPage', 'playlistsPage',
+                    'playlistDetailPage', 'statsPage', 'abosPage', 'downloadsPage'
                 ];
                 sections.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
                 const mainVideoSection = document.getElementById('mainVideoSection');
                 if (mainVideoSection) mainVideoSection.style.display = 'block';
                 currentPage = 'home';
                 previousPage = currentPage;
+                syncNativeBackHandler();
                 if (searchInput) searchInput.value = category;
                 performSearch(category);
             }
@@ -2008,18 +2042,6 @@ function attachEventListeners() {
         });
     }
     
-    // Hamburger navigation
-    document.querySelectorAll('.hamburger-item[data-page]').forEach(item => {
-        item.addEventListener('click', (e) => {
-            e.preventDefault();
-            const page = e.currentTarget.dataset.page;
-            navigateToPage(page);
-            if (hamburgerSidebar) hamburgerSidebar.classList.remove('active');
-            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
-            syncNativeBackHandler();
-        });
-    });
-
     // Watch Later via hamburger
     document.querySelectorAll('.hamburger-item[data-category="watchlater"]').forEach(item => {
         item.addEventListener('click', (e) => {
@@ -2045,12 +2067,18 @@ function attachEventListeners() {
     
     if (clearHistory) {
         clearHistory.addEventListener('click', () => {
-            if (confirm('Verlauf wirklich löschen?')) {
-                localStorage.removeItem('recentlyWatched');
-                if (recentlyWatched) recentlyWatched.style.display = 'none';
-                loadFullHistoryPage();
-                loadRecentlyWatched();
-            }
+            _showConfirmDialog(
+                'Verlauf löschen?',
+                'Möchtest du den gesamten Verlauf wirklich löschen?',
+                () => {
+                    localStorage.removeItem(getProfileKey('recentlyWatched'));
+                    if (recentlyWatched) recentlyWatched.style.display = 'none';
+                    loadFullHistoryPage();
+                    loadRecentlyWatched();
+                },
+                'Löschen',
+                true
+            );
         });
     }
     
@@ -2305,7 +2333,7 @@ function attachEventListeners() {
                 }
             } catch (e) {
                 console.error(e);
-                alert('Fehler beim Laden des Trailers.');
+                showNotification('Fehler beim Laden des Trailers.', 'error');
             } finally {
                 trailerBtn.innerHTML = '<i class="fas fa-film"></i> Trailer';
                 trailerBtn.disabled = false;
@@ -2333,13 +2361,19 @@ function attachEventListeners() {
         const filterSidebar    = document.getElementById('filterSidebar');
         const sidebarBackdrop  = document.getElementById('sidebarBackdrop');
         const infoModal        = document.getElementById('infoModal');
+        const profileModal     = document.getElementById('profileModal');
 
-        if (videoModal && videoModal.classList.contains('active')) {
+        if (videoModal && videoModal.classList.contains('active') && !videoModal.classList.contains('modal-minimized')) {
             if (document.fullscreenElement) {
                 document.exitFullscreen().catch(e => console.warn('exitFullscreen on back:', e));
             } else {
                 closeVideoModal();
             }
+            syncNativeBackHandler();
+            return true;
+        }
+        if (profileModal && getComputedStyle(profileModal).display !== 'none') {
+            closeProfileModal();
             syncNativeBackHandler();
             return true;
         }
@@ -2368,6 +2402,11 @@ function attachEventListeners() {
             syncNativeBackHandler();
             return true;
         }
+        if (localFolderDetailPage && localFolderDetailPage.style.display === 'block') {
+            navigateToPage('local');
+            syncNativeBackHandler();
+            return true;
+        }
         const playlistDetailPage    = document.getElementById('playlistDetailPage');
         if (playlistDetailPage && playlistDetailPage.style.display === 'block') {
             navigateToPage('playlists');
@@ -2377,7 +2416,7 @@ function attachEventListeners() {
 
         // Close new playlist modal if open
         const newPlModal = document.getElementById('newPlaylistModal');
-        if (newPlModal && newPlModal.style.display !== 'none') {
+        if (newPlModal && getComputedStyle(newPlModal).display !== 'none') {
             newPlModal.style.display = 'none';
             newPlModal.classList.remove('active');
             syncNativeBackHandler();
@@ -2586,9 +2625,11 @@ function attachEventListeners() {
         if (!window.AndroidNativeTheme) return;          // not on Android
         try {
             const videoModal            = document.getElementById('videoModal');
-            const hamburgerSidebar       = document.getElementById('hamburgerSidebar');
+            const hamburgerSidebar      = document.getElementById('hamburgerSidebar');
             const filterSidebar         = document.getElementById('filterSidebar');
             const infoModal             = document.getElementById('infoModal');
+            const profileModal          = document.getElementById('profileModal');
+            const newPlaylistModal      = document.getElementById('newPlaylistModal');
             const seriesDetailPage      = document.getElementById('seriesDetailPage');
             const localFolderDetailPage = document.getElementById('localFolderDetailPage');
             const historyPage           = document.getElementById('historyPage');
@@ -2596,24 +2637,36 @@ function attachEventListeners() {
             const localPage             = document.getElementById('localPage');
             const settingsPage          = document.getElementById('settingsPage');
             const watchlistPage         = document.getElementById('watchlistPage');
+            const watchLaterPage        = document.getElementById('watchLaterPage');
+            const playlistsPage         = document.getElementById('playlistsPage');
+            const playlistDetailPage    = document.getElementById('playlistDetailPage');
             const statsPage             = document.getElementById('statsPage');
             const abosPage              = document.getElementById('abosPage');
             const downloadsPage         = document.getElementById('downloadsPage');
+            const ctxMenu               = document.querySelector('.card-context-menu');
+
+            const isModalVisible = el => el && getComputedStyle(el).display !== 'none';
 
             const needsHandler = Boolean(
-                (videoModal            && videoModal.classList.contains('active'))      ||
-                (hamburgerSidebar       && hamburgerSidebar.classList.contains('active')) ||
+                (videoModal            && videoModal.classList.contains('active') && !videoModal.classList.contains('modal-minimized')) ||
+                (hamburgerSidebar      && hamburgerSidebar.classList.contains('active')) ||
                 (filterSidebar         && filterSidebar.classList.contains('active'))   ||
                 (infoModal             && infoModal.classList.contains('active'))       ||
-                (seriesDetailPage      && seriesDetailPage.style.display      === 'block')    ||
-                (localFolderDetailPage && localFolderDetailPage.style.display === 'block')    ||
-                (historyPage           && historyPage.style.display           === 'block')    ||
-                (livePage              && livePage.style.display              === 'block')    ||
-                (localPage             && localPage.style.display             === 'block')    ||
-                (settingsPage          && settingsPage.style.display          === 'block')    ||
-                (watchlistPage         && watchlistPage.style.display         === 'block')    ||
-                (statsPage             && statsPage.style.display             === 'block')    ||
-                (abosPage              && abosPage.style.display              === 'block')    ||
+                isModalVisible(profileModal)                                            ||
+                isModalVisible(newPlaylistModal)                                        ||
+                ctxMenu                                                                 ||
+                (seriesDetailPage      && seriesDetailPage.style.display      === 'block') ||
+                (localFolderDetailPage && localFolderDetailPage.style.display === 'block') ||
+                (historyPage           && historyPage.style.display           === 'block') ||
+                (livePage              && livePage.style.display              === 'block') ||
+                (localPage             && localPage.style.display             === 'block') ||
+                (settingsPage          && settingsPage.style.display          === 'block') ||
+                (watchlistPage         && watchlistPage.style.display         === 'block') ||
+                (watchLaterPage        && watchLaterPage.style.display        === 'block') ||
+                (playlistsPage         && playlistsPage.style.display         === 'block') ||
+                (playlistDetailPage    && playlistDetailPage.style.display    === 'block') ||
+                (statsPage             && statsPage.style.display             === 'block') ||
+                (abosPage              && abosPage.style.display              === 'block') ||
                 (downloadsPage         && downloadsPage.style.display         === 'block')
             );
 
@@ -2635,11 +2688,16 @@ function attachEventListeners() {
         if (el) _backObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
     });
     [
+        document.getElementById('profileModal'),
+        document.getElementById('newPlaylistModal'),
         document.getElementById('historyPage'),
         document.getElementById('livePage'),
         document.getElementById('localPage'),
         document.getElementById('settingsPage'),
         document.getElementById('watchlistPage'),
+        document.getElementById('watchLaterPage'),
+        document.getElementById('playlistsPage'),
+        document.getElementById('playlistDetailPage'),
         document.getElementById('statsPage'),
         document.getElementById('abosPage'),
         document.getElementById('downloadsPage'),
@@ -2664,6 +2722,24 @@ function attachEventListeners() {
     if (imprintLink) imprintLink.addEventListener('click', (e) => { e.preventDefault(); showInfoModal('imprint'); });
     if (privacyLink) privacyLink.addEventListener('click', (e) => { e.preventDefault(); showInfoModal('privacy'); });
     if (termsLink) termsLink.addEventListener('click', (e) => { e.preventDefault(); showInfoModal('terms'); });
+
+    // Settings "Über StreamHub" card buttons
+    const settingsAboutBtn = document.getElementById('settingsAboutBtn');
+    const settingsPrivacyBtn = document.getElementById('settingsPrivacyBtn');
+    const settingsShortcutsBtn = document.getElementById('settingsShortcutsBtn');
+    const settingsGithubBtn = document.getElementById('settingsGithubBtn');
+    if (settingsAboutBtn) settingsAboutBtn.addEventListener('click', () => showInfoModal('about'));
+    if (settingsPrivacyBtn) settingsPrivacyBtn.addEventListener('click', () => showInfoModal('privacy'));
+    if (settingsShortcutsBtn) settingsShortcutsBtn.addEventListener('click', () => {
+        const so = document.getElementById('shortcutOverlay');
+        if (so) so.style.display = 'flex';
+    });
+    if (settingsGithubBtn) settingsGithubBtn.addEventListener('click', () => {
+        const url = 'https://github.com/brawllaunchchannel22/streamhub';
+        if (window.electronAPI?.openExternal) window.electronAPI.openExternal(url);
+        else if (window.AndroidNativeTheme?.openUrl) window.AndroidNativeTheme.openUrl(url);
+        else window.open(url, '_blank');
+    });
     
     const closeInfoModal = document.getElementById('closeInfoModal');
     if (closeInfoModal) {
@@ -2731,11 +2807,17 @@ function attachEventListeners() {
     if (clearCache) {
         clearCache.addEventListener('click', () => {
             console.log('Clear cache clicked');
-            if (confirm('Cache wirklich leeren?')) {
-                thumbnailCache = {};
-                localStorage.removeItem('thumbnailCache');
-                alert('Cache wurde geleert!');
-            }
+            _showConfirmDialog(
+                'Cache leeren?',
+                'Möchtest du den Thumbnail-Cache wirklich leeren?',
+                () => {
+                    thumbnailCache = {};
+                    localStorage.removeItem('thumbnailCache');
+                    showNotification('Cache wurde geleert!', 'success');
+                },
+                'Leeren',
+                true
+            );
         });
     }
     
@@ -2758,47 +2840,56 @@ function attachEventListeners() {
     console.log('All event listeners attached');
 }
 
-// Load Default Content
+// Precompiled boundary-aware patterns for kids mode
+const _KIDS_EXACT_BOUNDARY_KEYWORDS = new Set([
+    'sex', 'blut', 'krieg', 'haft', 'jva', 'rente', 'ab 16', 'ab 18', 'fsk 16', 'fsk 18', 'steuern'
+]);
+const _KIDS_BLOCKED_KEYWORDS = [
+    // Reproductive / Sexual / Adult topics
+    'kinderwunsch', 'embryo', 'embryonentransfer', 'abtreibung', 'schwangerschaft',
+    'erotik', 'erotisch', 'sex', 'sexual', 'nackt', 'nacktheit', 'porno', 'bordell',
+    'prostitut', 'stripper', 'affäre', 'fsk 16', 'fsk 18', 'ab 16', 'ab 18',
+
+    // Crime / Murder / Horror / Thriller
+    'tatort', 'polizeiruf', 'krimi', 'mord', 'mörder', 'tötung', 'leiche', 'blut',
+    'horror', 'thriller', 'true crime', 'verbrechen', 'serienmörder', 'forensik',
+    'obduktion', 'pathologie', 'erdrosselt', 'erstochen', 'erschossen', 'ermordet',
+
+    // Violence / War / Terrorism / Crisis
+    'krieg', 'waffen', 'attentat', 'massaker', 'gewalt', 'hinrichtung', 'folter',
+    'terror', 'terrorist', 'amok', 'geisel', 'schießerei', 'bombe', 'anschlag',
+    'luftangriff', 'raketen', 'frontlinie', 'soldaten', 'ukraine-krieg', 'nahost-konflikt',
+    'hamas', 'israel-gaza', 'putin', 'taliban',
+
+    // Drugs / Abuse / Suicide
+    'drogen', 'sucht', 'süchtig', 'alkohol', 'kokain', 'heroin', 'cannabis',
+    'missbrauch', 'vergewaltigung', 'trauma', 'suizid', 'selbstmord', 'sterbehilfe',
+    'psychiatrie', 'psychose', 'geschlossene anstalt',
+
+    // Prison / Court
+    'gefängnis', 'haft', 'strafvollzug', 'justizvollzugsanstalt', 'jva', 'anklagebank',
+
+    // Adult Politics / Economy / Hard News
+    'bundestagswahl', 'parteitag', 'wahlkampf', 'inflation', 'insolvenz', 'finanzkrise',
+    'steuern', 'steuerhinterziehung', 'börsencrash', 'rente', 'altersarmut'
+];
+const _KIDS_BLOCKED_REGEXES = _KIDS_BLOCKED_KEYWORDS.map(kw => {
+    const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (_KIDS_EXACT_BOUNDARY_KEYWORDS.has(kw)) {
+        return new RegExp(`(?:^|[^a-z0-9äöüß])${esc}(?:$|[^a-z0-9äöüß])`, 'i');
+    }
+    return new RegExp(`(?:^|[^a-z0-9äöüß])${esc}`, 'i');
+});
+
 // Filter out content unsuitable for children when kids profile is active
 function filterKidsSafe(items) {
     if (!items || !Array.isArray(items)) return [];
     const active = getActiveProfile();
     if (!active || !active.isKids) return items;
-    
-    // Comprehensive block patterns for kids mode (case-insensitive substring check)
-    const blockedKeywords = [
-        // Reproductive / Sexual / Adult topics
-        'kinderwunsch', 'embryo', 'embryonentransfer', 'abtreibung', 'schwangerschaft',
-        'erotik', 'erotisch', 'sex', 'sexual', 'nackt', 'nacktheit', 'porno', 'bordell', 
-        'prostitut', 'stripper', 'affäre', 'fsk 16', 'fsk 18', 'ab 16', 'ab 18',
-        
-        // Crime / Murder / Horror / Thriller
-        'tatort', 'polizeiruf', 'krimi', 'mord', 'mörder', 'tötung', 'leiche', 'blut', 
-        'horror', 'thriller', 'true crime', 'verbrechen', 'serienmörder', 'forensik',
-        'obduktion', 'pathologie', 'erdrosselt', 'erstochen', 'erschossen', 'ermordet',
-        
-        // Violence / War / Terrorism / Crisis
-        'krieg', 'waffen', 'attentat', 'massaker', 'gewalt', 'hinrichtung', 'folter', 
-        'terror', 'terrorist', 'amok', 'geisel', 'schießerei', 'bombe', 'anschlag', 
-        'luftangriff', 'raketen', 'frontlinie', 'soldaten', 'ukraine-krieg', 'nahost-konflikt',
-        'hamas', 'israel-gaza', 'putin', 'taliban',
-        
-        // Drugs / Abuse / Suicide
-        'drogen', 'sucht', 'süchtig', 'alkohol', 'kokain', 'heroin', 'cannabis', 
-        'missbrauch', 'vergewaltigung', 'trauma', 'suizid', 'selbstmord', 'sterbehilfe',
-        'psychiatrie', 'psychose', 'geschlossene anstalt',
-        
-        // Prison / Court
-        'gefängnis', 'haft', 'strafvollzug', 'justizvollzugsanstalt', 'jva', 'anklagebank',
-        
-        // Adult Politics / Economy / Hard News
-        'bundestagswahl', 'parteitag', 'wahlkampf', 'inflation', 'insolvenz', 'finanzkrise',
-        'steuern', 'steuerhinterziehung', 'börsencrash', 'rente', 'altersarmut'
-    ];
-    
+
     return items.filter(item => {
-        const text = `${item.title || ''} ${item.topic || ''} ${item.description || ''}`.toLowerCase();
-        return !blockedKeywords.some(kw => text.includes(kw));
+        const text = `${item.title || ''} ${item.topic || ''} ${item.description || ''}`;
+        return !_KIDS_BLOCKED_REGEXES.some(re => re.test(text));
     });
 }
 
@@ -4053,8 +4144,12 @@ function playVideo(item) {
         document.title = '[PLAYING] ' + (item.title || 'StreamHub');
         
         // Always open video modal so user sees response
-        if (videoModal) videoModal.classList.add('active');
+        if (videoModal) {
+            videoModal.classList.remove('modal-minimized');
+            videoModal.classList.add('active');
+        }
         try { if (window.AndroidNativeTheme && window.AndroidNativeTheme.updatePipAutoEnter) window.AndroidNativeTheme.updatePipAutoEnter(true); } catch(e){}
+        if (window._syncNativeBackHandler) window._syncNativeBackHandler();
         setTimeout(() => { if (typeof window._updateAndroidPipBounds === 'function') window._updateAndroidPipBounds(); }, 250);
         // Re-init the 2x hold zone – the container exists now that modal is open
         setTimeout(() => {
@@ -4495,22 +4590,26 @@ function loadVideoSource(videoUrl, resumeTime = 0) {
             }
         }
 
+        if (hlsInstance) {
+            hlsInstance.destroy();
+            hlsInstance = null;
+        }
+
         if (videoUrl.includes('.m3u8') && typeof Hls !== 'undefined') {
             if (Hls.isSupported()) {
-                if (hlsInstance) hlsInstance.destroy();
                 hlsInstance = new Hls();
                 hlsInstance.loadSource(videoUrl);
                 hlsInstance.attachMedia(videoPlayer);
                 hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-                    videoPlayer.play();
+                    videoPlayer.play().catch(err => console.warn('Play failed:', err));
                 });
             } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
                 videoPlayer.src = videoUrl;
-                videoPlayer.play();
+                videoPlayer.play().catch(err => console.warn('Play failed:', err));
             }
         } else {
             videoPlayer.src = videoUrl;
-            videoPlayer.play();
+            videoPlayer.play().catch(err => console.warn('Play failed:', err));
         }
     } catch (error) {
         console.error('Load video error:', error);
@@ -4520,7 +4619,9 @@ function loadVideoSource(videoUrl, resumeTime = 0) {
 function closeVideoModal() {
     try {
         if (window._releaseWakeLock) window._releaseWakeLock();
-        if (videoModal) videoModal.classList.remove('active');
+        if (videoModal) {
+            videoModal.classList.remove('active', 'modal-minimized', 'modal-restoring');
+        }
         try { if (window.AndroidNativeTheme && window.AndroidNativeTheme.updatePipAutoEnter) window.AndroidNativeTheme.updatePipAutoEnter(false); } catch(e){}
         if (videoPlayer) {
             videoPlayer.pause();
@@ -4540,11 +4641,12 @@ function closeVideoModal() {
         // Reset focus to body so that lingering focus is cleared
         document.body.focus();
         
-        syncNativeBackHandler();
+        if (window._syncNativeBackHandler) window._syncNativeBackHandler();
     } catch (error) {
         console.error('Close modal error:', error);
     }
 }
+window.closeVideoModal = closeVideoModal;
 
 // Apply Filters
 function applyFilters() {
@@ -4734,8 +4836,8 @@ function displayMoreResults() {
 function navigateToPage(page) {
     if (page !== currentPage) {
         previousPage = currentPage;
-        // Close video player modal when navigating away
-        if (typeof closeVideoModal === 'function') {
+        // Close video player modal when navigating away (unless minimized as miniplayer)
+        if (typeof closeVideoModal === 'function' && (!videoModal || !videoModal.classList.contains('modal-minimized'))) {
             closeVideoModal();
         }
     }
@@ -5038,26 +5140,29 @@ async function shareVideo() {
 }
 
 function copyToClipboard(text) {
-    if (navigator.clipboard) {
-        navigator.clipboard.writeText(text).then(() => {
-            alert('Link in Zwischenablage kopiert!');
-        });
-    } else {
+    const fallbackCopy = () => {
         const textarea = document.createElement('textarea');
         textarea.value = text;
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand('copy');
         document.body.removeChild(textarea);
-        alert('Link in Zwischenablage kopiert!');
+        showNotification('Link in Zwischenablage kopiert!', 'success');
+    };
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(text).then(() => {
+            showNotification('Link in Zwischenablage kopiert!', 'success');
+        }).catch(fallbackCopy);
+    } else {
+        fallbackCopy();
     }
 }
 
 // Format Date
 function formatDate(date) {
     const now = new Date();
-    const diffTime = Math.abs(now - date);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diffTime = Math.max(0, now - date);
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
     
     if (diffDays === 0) return 'Heute';
     if (diffDays === 1) return 'Gestern';
@@ -5077,17 +5182,19 @@ function showInfoModal(type) {
     const content = {
         about: `
             <h2>Über StreamHub</h2>
-            <p>StreamHub ist eine moderne Desktop-Anwendung für deutsche öffentlich-rechtliche Mediatheken.</p>
+            <p>StreamHub ist eine moderne App für deutsche öffentlich-rechtliche Mediatheken — kostenlos, Open Source, ohne Account.</p>
             <h3>Features</h3>
             <ul>
-                <li>✅ Tausende Videos durchsuchen</li>
+                <li>✅ Tausende Videos durchsuchen &amp; filtern</li>
+                <li>✅ Livestreams (HLS) mit Kanalwechsel</li>
+                <li>✅ Miniplayer &amp; Picture-in-Picture (PiP)</li>
+                <li>✅ Playlists &amp; Merkliste</li>
+                <li>✅ Profile &amp; Datensicherung</li>
+                <li>✅ Lokale Videos abspielen</li>
                 <li>✅ Generierte Thumbnails mit Sender-Branding</li>
-                <li>✅ Filter nach Sender und Dauer</li>
-                <li>✅ Zuletzt angesehen Funktion</li>
-                <li>✅ HD-Qualität wo verfügbar</li>
-                <li>✅ Keine Registrierung erforderlich</li>
+                <li>✅ Keine Registrierung, keine Werbung</li>
             </ul>
-            <p style="margin-top: 1rem;"><strong>Version:</strong> 3.0.0 (2026)</p>
+            <p style="margin-top: 1rem;"><strong>Version:</strong> v3.0.6</p>
         `,
         faq: `
             <h2>Häufig gestellte Fragen</h2>
@@ -5128,7 +5235,7 @@ function showInfoModal(type) {
             <h3>Externe Dienste</h3>
             <ul>
                 <li>📺 <strong>Videos</strong>: Von Sender-Servern geladen</li>
-                <li>🔌 <strong>CDN</strong>: Font Awesome, HLS.js</li>
+                <li>📦 <strong>Bibliotheken</strong>: Font Awesome &amp; HLS.js sind lokal gebündelt (kein CDN)</li>
             </ul>
         `,
         terms: `
@@ -5258,8 +5365,19 @@ function playLiveChannel(channel) {
             console.error('Modal/Player not found!');
             return;
         }
-        
+
+        window.currentPlayingVideo = null;
+        window._currentPlayingItem = null;
+        if (hlsInstance) {
+            hlsInstance.destroy();
+            hlsInstance = null;
+        }
+
+        videoModal.classList.remove('modal-minimized');
         videoModal.classList.add('active');
+        try { if (window.AndroidNativeTheme && window.AndroidNativeTheme.updatePipAutoEnter) window.AndroidNativeTheme.updatePipAutoEnter(true); } catch(e){}
+        setTimeout(() => { if (typeof window._updateAndroidPipBounds === 'function') window._updateAndroidPipBounds(); }, 250);
+        if (window._syncNativeBackHandler) window._syncNativeBackHandler();
         
         const videoTitle = document.getElementById('videoTitle');
         const videoChannel = document.getElementById('videoChannel');
@@ -5276,26 +5394,25 @@ function playLiveChannel(channel) {
         // Load HLS stream
         if (channel.url.includes('.m3u8') && typeof Hls !== 'undefined') {
             if (Hls.isSupported()) {
-                if (hlsInstance) hlsInstance.destroy();
                 hlsInstance = new Hls();
                 hlsInstance.loadSource(channel.url);
                 hlsInstance.attachMedia(videoPlayer);
                 hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-                    videoPlayer.play();
+                    videoPlayer.play().catch(err => console.warn('Live play failed:', err));
                 });
             } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
                 videoPlayer.src = channel.url;
-                videoPlayer.play();
+                videoPlayer.play().catch(err => console.warn('Live play failed:', err));
             }
         } else {
             videoPlayer.src = channel.url;
-            videoPlayer.play();
+            videoPlayer.play().catch(err => console.warn('Live play failed:', err));
         }
         
         console.log('Live channel playing!');
     } catch (error) {
         console.error('playLiveChannel error:', error);
-        alert('Fehler beim Laden des Live-Streams: ' + error.message);
+        showNotification('Fehler beim Laden des Live-Streams: ' + error.message, 'error');
     }
 }
 
@@ -5423,7 +5540,8 @@ function loadLocalVideosPage() {
     // Group videos by folder
     const videosByFolder = {};
     localVideos.forEach(video => {
-        const folder = video.path.substring(0, video.path.lastIndexOf('/') || video.path.lastIndexOf('\\'));
+        const sepIdx = Math.max(video.path.lastIndexOf('/'), video.path.lastIndexOf('\\'));
+        const folder = sepIdx >= 0 ? video.path.substring(0, sepIdx) : video.path;
         if (!videosByFolder[folder]) {
             videosByFolder[folder] = [];
         }
@@ -5497,6 +5615,9 @@ function openFolderDetail(folderPath, videos) {
     // Hide local page, show detail page
     document.getElementById('localPage').style.display = 'none';
     document.getElementById('localFolderDetailPage').style.display = 'block';
+    previousPage = currentPage;
+    currentPage = 'localFolderDetail';
+    if (window._syncNativeBackHandler) window._syncNativeBackHandler();
     
     // Set title
     const folderName = folderPath.split('/').pop() || folderPath.split('\\').pop() || folderPath;
@@ -5517,6 +5638,7 @@ function openFolderDetail(folderPath, videos) {
             const sortedVideos = sortFolderVideos(window.currentFolderVideos, sortSelect.value);
             renderFolderVideos(sortedVideos);
         };
+        if (typeof syncCustomSelect === 'function') syncCustomSelect(sortSelect);
     }
 }
 
@@ -5575,7 +5697,7 @@ function renderFolderVideos(videos) {
         // Queue thumbnail generation
         const thumbEl = document.getElementById(thumbId);
         if (thumbEl) {
-            queueThumbnailGeneration(video.path, thumbEl);
+            queueThumbnailGeneration(video.path, thumbEl, video.streamUrl);
         }
     });
 }
@@ -5621,7 +5743,7 @@ async function processThumbnailQueue() {
     while (thumbnailQueue.length > 0 && activeThumbnails < MAX_CONCURRENT_THUMBNAILS) {
         const item = thumbnailQueue.shift();
         activeThumbnails++;
-        generateLocalThumbnail(item.videoPath, item.thumbnailElement).finally(() => {
+        generateLocalThumbnail(item.videoPath, item.thumbnailElement, item.streamUrl).finally(() => {
             activeThumbnails--;
             processThumbnailQueue();
         });
@@ -5630,13 +5752,13 @@ async function processThumbnailQueue() {
     isProcessingThumbnails = false;
 }
 
-function queueThumbnailGeneration(videoPath, thumbnailElement) {
-    thumbnailQueue.push({ videoPath, thumbnailElement });
+function queueThumbnailGeneration(videoPath, thumbnailElement, streamUrl = null) {
+    thumbnailQueue.push({ videoPath, thumbnailElement, streamUrl });
     processThumbnailQueue();
 }
 
 // Generate thumbnail from local video
-async function generateLocalThumbnail(videoPath, thumbnailElement) {
+async function generateLocalThumbnail(videoPath, thumbnailElement, streamUrl = null) {
     return new Promise((resolve) => {
         try {
             const cachedThumb = localStorage.getItem(`local_thumb_${videoPath}`);
@@ -5650,7 +5772,7 @@ async function generateLocalThumbnail(videoPath, thumbnailElement) {
             const video = document.createElement('video');
             video.muted = true;
             video.preload = 'metadata';
-            video.src = `file://${videoPath}`;
+            video.src = streamUrl || `file://${videoPath}`;
             
             let cleaned = false;
             const cleanup = () => {
@@ -5721,27 +5843,44 @@ window.removeLocalFolder = function(path) {
 
 function playLocalVideo(video) {
     try {
-        console.log('Playing local video:', video.name);
+        console.log('Playing local video:', video.name || video.title);
         if (!videoModal || !videoPlayer) return;
-        
+
+        const src = video.streamUrl || video.url_video || (video.path ? `file://${video.path}` : '');
+        if (!src) {
+            showNotification('Lokale Videodatei konnte nicht geöffnet werden.', 'error');
+            return;
+        }
+
+        window.currentPlayingVideo = null;
+        window._currentPlayingItem = null;
+        if (hlsInstance) {
+            hlsInstance.destroy();
+            hlsInstance = null;
+        }
+
+        videoModal.classList.remove('modal-minimized');
         videoModal.classList.add('active');
-        
+        try { if (window.AndroidNativeTheme && window.AndroidNativeTheme.updatePipAutoEnter) window.AndroidNativeTheme.updatePipAutoEnter(true); } catch(e){}
+        setTimeout(() => { if (typeof window._updateAndroidPipBounds === 'function') window._updateAndroidPipBounds(); }, 250);
+        if (window._syncNativeBackHandler) window._syncNativeBackHandler();
+
         const videoTitle = document.getElementById('videoTitle');
         const videoChannel = document.getElementById('videoChannel');
         const videoDescription = document.getElementById('videoDescription');
-        
-        if (videoTitle) videoTitle.textContent = video.name;
+
+        if (videoTitle) videoTitle.textContent = video.name || video.title || 'Lokales Video';
         if (videoChannel) {
             videoChannel.textContent = 'Lokal';
             videoChannel.style.background = '#374151';
         }
-        if (videoDescription) videoDescription.textContent = video.path;
-        
-        videoPlayer.src = `file://${video.path}`;
-        videoPlayer.play();
+        if (videoDescription) videoDescription.textContent = video.path || video.fileName || '';
+
+        videoPlayer.src = src;
+        videoPlayer.play().catch(err => console.warn('Play failed:', err));
     } catch (error) {
         console.error('Play local video error:', error);
-        alert('Fehler beim Laden: ' + error.message);
+        showNotification('Fehler beim Laden: ' + error.message, 'error');
     }
 }
 
@@ -5800,6 +5939,15 @@ function loadSettings() {
     }
 
     console.log('Settings loaded:', { useRealThumbnails, tmdbKeySet: !!TMDB_API_KEY, theme: savedTheme });
+
+    // Platform badge in About card
+    const platformBadge = document.getElementById('settingsPlatformBadge');
+    if (platformBadge) {
+        if (window.AndroidNativeTheme) platformBadge.textContent = 'Android';
+        else if (window.electronAPI) platformBadge.textContent = 'Desktop (Linux)';
+        else platformBadge.textContent = 'Web';
+    }
+
     // Re-sync static cust-select wrappers (already in HTML) to reflect current values
     if (typeof initCustSelects === 'function') setTimeout(initCustSelects, 0);
 }
@@ -6050,8 +6198,7 @@ console.log('Real thumbnail capture system loaded!');
 // ===== TMDB API INTEGRATION =====
 // TMDB API key — loaded from localStorage; users set it in Settings
 // Get a free key at https://www.themoviedb.org/settings/api
-const DEFAULT_TMDB_KEY = '849d718b54e75466aeecb0c1b3d05123';
-let TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || DEFAULT_TMDB_KEY;
+let TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || '';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
@@ -6088,7 +6235,7 @@ function findBestSeriesSearchQuery(seriesName, episodes = []) {
 
 // Search for a series on TMDB with intelligent matching
 async function searchTMDBSeries(seriesName, sampleItem = null) {
-    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || DEFAULT_TMDB_KEY;
+    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || '';
     if (!TMDB_API_KEY || !seriesName) return null;
 
     const channel = sampleItem ? (sampleItem.channel || '') : '';
@@ -6224,7 +6371,7 @@ async function searchTMDBSeries(seriesName, sampleItem = null) {
 
 // Get detailed series information from TMDB
 async function getTMDBSeriesDetails(seriesId) {
-    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || DEFAULT_TMDB_KEY;
+    TMDB_API_KEY = localStorage.getItem('tmdbApiKey') || '';
     if (!TMDB_API_KEY) return null;
     
     // Check cache
@@ -6631,12 +6778,14 @@ function loadAbosPage() {
             const sections = [
                 'mainVideoSection', 'historyPage', 'recentlyWatched', 'livePage',
                 'localPage', 'localFolderDetailPage', 'seriesDetailPage',
-                'settingsPage', 'watchlistPage', 'statsPage', 'abosPage', 'downloadsPage'
+                'settingsPage', 'watchlistPage', 'watchLaterPage', 'playlistsPage',
+                'playlistDetailPage', 'statsPage', 'abosPage', 'downloadsPage'
             ];
             sections.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
             const mainVideoSection = document.getElementById('mainVideoSection');
             if (mainVideoSection) mainVideoSection.style.display = 'block';
             currentPage = 'home';
+            if (window._syncNativeBackHandler) window._syncNativeBackHandler();
             const inp = document.getElementById('searchInput');
             if (inp) inp.value = term;
             performSearch(term);
@@ -7628,7 +7777,7 @@ function syncCustomSelect(selectEl) {
     }
     wrapper.style.display = 'block';
 
-    const selectedOpt = options.find(o => o.selected) || options[0];
+    const selectedOpt = options.find(o => o.value === selectEl.value) || options.find(o => o.selected) || options[0];
     const selectedText = selectedOpt ? selectedOpt.textContent : '';
 
     wrapper.innerHTML = `
@@ -7639,25 +7788,38 @@ function syncCustomSelect(selectEl) {
     `;
 
     const trigger = wrapper.querySelector('.cust-select-trigger');
-    trigger.onclick = (e) => {
+    const toggleOpen = (e) => {
         e.stopPropagation();
         document.querySelectorAll('.cust-select.open').forEach(other => {
             if (other !== wrapper) other.classList.remove('open');
         });
         wrapper.classList.toggle('open');
     };
+    trigger.addEventListener('click', toggleOpen);
+    trigger.addEventListener('touchend', (e) => { e.preventDefault(); toggleOpen(e); }, { passive: false });
 
     wrapper.querySelectorAll('.cust-opt').forEach(opt => {
-        opt.onclick = (e) => {
+        const chooseOpt = (e) => {
             e.stopPropagation();
             selectEl.value = opt.dataset.value;
             selectEl.dispatchEvent(new Event('change', { bubbles: true }));
             wrapper.classList.remove('open');
             syncCustomSelect(selectEl);
         };
+        opt.addEventListener('click', chooseOpt);
+        opt.addEventListener('touchend', (e) => { e.preventDefault(); chooseOpt(e); }, { passive: false });
     });
 }
 window.syncCustomSelect = syncCustomSelect;
+
+function syncAllSelects() {
+    if (typeof initCustSelects === 'function') initCustSelects();
+    ['localSortBy', 'qualitySelector', 'subtitleSelector'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) syncCustomSelect(el);
+    });
+}
+window.syncAllSelects = syncAllSelects;
 
 // ── Auto-init all static cust-select elements on load ──────────────────────
 if (document.readyState === 'loading') {
@@ -7784,92 +7946,6 @@ if (document.readyState === 'loading') {
     window._reinitHoldZone2x = () => {}; // no-op now; kept for compat
 })();
 
-// ── Long-Press on Video Cards → Watch Later context menu ─────────────────────
-(function setupCardLongPress() {
-    let pressTimer = null;
-    let didLongPress = false;
-
-    function showCardMenu(item, cardEl) {
-        // Remove any existing menu
-        document.querySelectorAll('.card-context-menu').forEach(m => m.remove());
-
-        const menu = document.createElement('div');
-        menu.className = 'card-context-menu';
-        const inWL = isInWatchlist(item);
-        const inWLater = isInWatchLater(item);
-        menu.innerHTML = `
-            <button class="ctx-item ctx-watchlater">
-                <i class="${inWLater ? 'fas' : 'far'} fa-clock"></i>
-                ${inWLater ? 'Aus „Später ansehen" entfernen' : 'Später ansehen'}
-            </button>
-            <button class="ctx-item ctx-watchlist">
-                <i class="fas fa-heart"></i>
-                ${inWL ? 'Von Merkliste entfernen' : 'Zur Merkliste hinzufügen'}
-            </button>
-            <button class="ctx-item ctx-cancel">
-                <i class="fas fa-times"></i> Abbrechen
-            </button>
-        `;
-
-        // Position near card
-        const rect = cardEl.getBoundingClientRect();
-        menu.style.cssText = `
-            position: fixed;
-            top: ${Math.min(rect.bottom, window.innerHeight - 180)}px;
-            left: ${Math.max(8, Math.min(rect.left, window.innerWidth - 260))}px;
-            z-index: 9999;
-        `;
-
-        menu.querySelector('.ctx-watchlater').addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleWatchLater(item, null);
-            menu.remove();
-        });
-        menu.querySelector('.ctx-watchlist').addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleWatchlist(item, null);
-            menu.remove();
-        });
-        menu.querySelector('.ctx-cancel').addEventListener('click', () => menu.remove());
-
-        document.body.appendChild(menu);
-        setTimeout(() => {
-            document.addEventListener('click', () => menu.remove(), { once: true });
-        }, 10);
-        if (window._haptic) window._haptic.heavy();
-    }
-
-    // Delegate to all current and future video-card elements
-    document.addEventListener('touchstart', (e) => {
-        const card = e.target.closest('.video-card');
-        if (!card || e.target.closest('.watchlist-btn, .watchlater-btn')) return;
-        const item = card._videoItem;
-        if (!item) return;
-        pressTimer = setTimeout(() => {
-            didLongPress = true;
-            showCardMenu(item, card);
-        }, 600);
-    }, { passive: true });
-
-    document.addEventListener('touchend', () => {
-        clearTimeout(pressTimer);
-        pressTimer = null;
-    });
-    document.addEventListener('touchmove', () => {
-        clearTimeout(pressTimer);
-        pressTimer = null;
-    }, { passive: true });
-
-    // Store item ref on card when created
-    const origCreate = window.createVideoCard;
-    if (origCreate) {
-        window.createVideoCard = function(item, index) {
-            const card = origCreate(item, index);
-            card._videoItem = item;
-            return card;
-        };
-    }
-})();
 
 // Sync all selects after DOMContentLoaded
 document.addEventListener('DOMContentLoaded', () => {
@@ -8151,15 +8227,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Clear minimized on close (guard against double-wrap)
-    if (!window._miniplayerClosePatched) {
-        window._miniplayerClosePatched = true;
-        const _origClose = window.closeVideoModal;
-        window.closeVideoModal = function(...args) {
-            videoModal.classList.remove('modal-minimized');
-            if (typeof _origClose === 'function') return _origClose(...args);
-        };
-    }
 });
 
 
@@ -8237,6 +8304,16 @@ document.addEventListener('DOMContentLoaded', () => renderSearchChips());
         }
     });
 })();
+
+function formatDuration(seconds) {
+    const total = Math.floor(Number(seconds));
+    if (!isFinite(total) || total <= 0) return '';
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const pad = n => String(n).padStart(2, '0');
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
 
 // ── Ähnliche Videos ───────────────────────────────────────────────────────────
 // After opening a video, fetch related videos (same topic/sender) and show them.

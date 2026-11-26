@@ -1,6 +1,6 @@
 name: streamhub
 base: core22
-version: '3.0.5'
+version: '3.0.6'
 summary: Moderne Mediathek-App für deutsche Sender
 description: |
   StreamHub ist deine zentrale Plattform für Inhalte der deutschen

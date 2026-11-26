@@ -5,9 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <title>StreamHub - Deutsche Mediatheken</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
+    <script src="vendor/hls.min.js"></script>
     <meta name="google-site-verification" content="kU7JcON78ftuN_B70L5JQ_Ca-2zuc93uXuCSLP4tR9s" />
 </head>
 <body>
@@ -524,7 +523,7 @@
             </div>
             <div class="settings-container">
                 <div class="settings-section">
-                    <h3>Darstellung</h3>
+                    <h3><i class="fas fa-palette" style="color:var(--primary-color,#6366f1);margin-right:.5rem;"></i>Darstellung</h3>
                     <div class="setting-item">
                         <label class="checkbox-label">
                             <input type="checkbox" id="settingRealThumbnails">
@@ -568,7 +567,7 @@
                     </div>
                 </div>
                 <div class="settings-section">
-                    <h3>Lokale Videos</h3>
+                    <h3><i class="fas fa-folder-open" style="color:var(--primary-color,#6366f1);margin-right:.5rem;"></i>Lokale Videos</h3>
                     <div class="setting-item">
                         <label>Standard-Videoplayer</label>
                         <select id="settingDefaultPlayer" style="display:none">
@@ -589,8 +588,8 @@
                         </button>
                     </div>
                 </div>
-                                <div class="settings-section">
-                    <h3><i class="fas fa-film" style="color:#6366f1;margin-right:.5rem;"></i>TMDB API (Serien-Poster)</h3>
+                <div class="settings-section">
+                    <h3><i class="fas fa-film" style="color:var(--primary-color,#6366f1);margin-right:.5rem;"></i>TMDB API (Serien-Poster)</h3>
                     <div class="setting-item">
                         <label>API Key</label>
                         <div class="tmdb-key-row">
@@ -601,7 +600,7 @@
                     </div>
                 </div>
                 <div class="settings-section">
-                    <h3><i class="fas fa-users" style="color:var(--primary-color,#6366f1);margin-right:.5rem;"></i>Profile & Datensicherung</h3>
+                    <h3><i class="fas fa-users" style="color:var(--primary-color,#6366f1);margin-right:.5rem;"></i>Profile &amp; Datensicherung</h3>
                     <div class="setting-item">
                         <label>Benutzerprofile</label>
                         <p class="setting-description">Verwalte getrennte Profile für Familie, Kinder oder verschiedene Interessen (Merkliste, Verlauf und Playlists sind pro Profil getrennt).</p>
@@ -623,12 +622,29 @@
                     </div>
                 </div>
                 <div class="settings-section">
-                    <h3>Cache & Speicher</h3>
+                    <h3><i class="fas fa-trash-alt" style="color:var(--primary-color,#6366f1);margin-right:.5rem;"></i>Cache &amp; Speicher</h3>
                     <div class="setting-item">
                         <button id="clearCache" class="btn-secondary">
                             <i class="fas fa-trash"></i> Cache leeren
                         </button>
                         <p class="setting-description">Löscht temporäre Dateien und Thumbnails</p>
+                    </div>
+                </div>
+                <div class="settings-section settings-about-card">
+                    <h3><i class="fas fa-tv" style="color:var(--primary-color,#6366f1);margin-right:.5rem;"></i>Über StreamHub</h3>
+                    <div class="about-app-header">
+                        <div class="about-app-title">
+                            <strong>StreamHub</strong>
+                            <span class="version-badge" data-app-version>v3.0.6</span>
+                            <span id="settingsPlatformBadge" class="platform-badge">Desktop / Android</span>
+                        </div>
+                        <p class="setting-description">Freie Open-Source-Mediathek-App (MIT-Lizenz) &mdash; ohne Werbung, Tracker oder externe CDNs.</p>
+                    </div>
+                    <div class="about-quick-actions">
+                        <button id="settingsAboutBtn" class="btn-secondary btn-sm"><i class="fas fa-play-circle"></i> Über die App</button>
+                        <button id="settingsPrivacyBtn" class="btn-secondary btn-sm"><i class="fas fa-check-circle"></i> Datenschutz</button>
+                        <button id="settingsShortcutsBtn" class="btn-secondary btn-sm"><i class="fas fa-keyboard"></i> Tastaturkürzel</button>
+                        <button id="settingsGithubBtn" class="btn-secondary btn-sm"><i class="fas fa-file-code"></i> Quellcode (GitHub)</button>
                     </div>
                 </div>
             </div>
@@ -675,7 +691,7 @@
     <footer class="footer">
         <div class="footer-content">
             <div class="footer-section">
-                <h4>StreamHub</h4>
+                <h4>StreamHub <span class="version-badge" data-app-version>v3.0.6</span></h4>
                 <p>Deine zentrale Plattform für deutsche öffentlich-rechtliche Inhalte.</p>
             </div>
             <div class="footer-section">
@@ -699,7 +715,7 @@
             </div>
         </div>
         <div class="footer-bottom">
-            <p>StreamHub ist ein freies Open-Source-Projekt (MIT-Lizenz). Alle Medieninhalte und Marken gehören den jeweiligen Rundfunkanstalten.</p>
+            <p>StreamHub <span data-app-version>v3.0.6</span> &bull; Freies Open-Source-Projekt (MIT-Lizenz). Alle Medieninhalte und Marken gehören den jeweiligen Rundfunkanstalten.</p>
         </div>
     </footer>
 

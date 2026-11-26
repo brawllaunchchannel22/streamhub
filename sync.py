@@ -21,11 +21,24 @@ def sync_files():
         else:
             print(f"  ⚠️ Warnung: {filename} existiert nicht in Root!")
 
+    vendor_src = os.path.join(base_dir, 'vendor')
+    vendor_dst = os.path.join(www_dir, 'vendor')
+    if os.path.isdir(vendor_src):
+        if os.path.exists(vendor_dst):
+            shutil.rmtree(vendor_dst)
+        shutil.copytree(vendor_src, vendor_dst)
+        print("  ✓ vendor/ -> www/vendor/")
+
     print("\n📱 Führe 'npx cap sync android' aus...")
     env = os.environ.copy()
-    node22_path = "/home/brawllaunchchannel/.nvm/versions/node/v22.22.3/bin"
-    if os.path.exists(node22_path):
-        env["PATH"] = f"{node22_path}:{env.get('PATH', '')}"
+    nvm_dir = os.path.expanduser("~/.nvm/versions/node")
+    if os.path.isdir(nvm_dir):
+        versions = sorted(os.listdir(nvm_dir), reverse=True)
+        for v in versions:
+            candidate_bin = os.path.join(nvm_dir, v, "bin")
+            if os.path.isdir(candidate_bin):
+                env["PATH"] = f"{candidate_bin}:{env.get('PATH', '')}"
+                break
         
     try:
         res = subprocess.run(['npx', 'cap', 'sync', 'android'], cwd=base_dir, check=True, env=env)
@@ -33,8 +46,9 @@ def sync_files():
         
         # Auto-copy freshly built APK to Desktop if present
         apk_src = os.path.join(base_dir, 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk')
-        desktop_apk = os.path.expanduser('~/Schreibtisch/StreamHub-debug.apk')
-        if os.path.exists(apk_src):
+        desktop_dir = os.path.expanduser('~/Schreibtisch') if os.path.isdir(os.path.expanduser('~/Schreibtisch')) else os.path.expanduser('~/Desktop')
+        desktop_apk = os.path.join(desktop_dir, 'StreamHub-debug.apk')
+        if os.path.exists(apk_src) and os.path.isdir(desktop_dir):
             shutil.copy2(apk_src, desktop_apk)
             print(f"📦 Aktuelles APK automatisch nach {desktop_apk} kopiert!")
     except Exception as e:

@@ -35,6 +35,9 @@ public class MainActivity extends BridgeActivity {
 
     private BroadcastReceiver pipActionReceiver;
     private boolean _isInPip = false;
+    private boolean pipAutoEnterEnabled = false;
+    private android.graphics.Rect lastPipSourceRect = null;
+    private Rational lastPipAspectRatio = new Rational(16, 9);
 
     private OnBackPressedCallback webViewBackCallback;
 
@@ -81,6 +84,22 @@ public class MainActivity extends BridgeActivity {
                     @android.webkit.JavascriptInterface
                     public boolean isBackHandlerEnabled() {
                         return webViewBackCallback.isEnabled();
+                    }
+
+                    @android.webkit.JavascriptInterface
+                    public void finishApp() {
+                        runOnUiThread(() -> {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                finishAndRemoveTask();
+                            } else {
+                                finish();
+                            }
+                        });
+                    }
+
+                    @android.webkit.JavascriptInterface
+                    public void exitApp() {
+                        finishApp();
                     }
 
                     // Haptic vibration — M3 Expressive touch feedback
@@ -145,14 +164,13 @@ public class MainActivity extends BridgeActivity {
                     @android.webkit.JavascriptInterface
                     public void updatePipAutoEnter(boolean enabled) {
                         runOnUiThread(() -> {
+                            pipAutoEnterEnabled = enabled;
+                            if (!enabled) {
+                                lastPipSourceRect = null;
+                            }
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                 try {
-                                    PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
-                                    builder.setAspectRatio(new Rational(16, 9));
-                                    builder.setAutoEnterEnabled(enabled);
-                                    List<RemoteAction> actions = buildPipActions();
-                                    if (!actions.isEmpty()) builder.setActions(actions);
-                                    setPictureInPictureParams(builder.build());
+                                    setPictureInPictureParams(buildPipParams(enabled));
                                 } catch (Exception e) { e.printStackTrace(); }
                             }
                         });
@@ -165,26 +183,22 @@ public class MainActivity extends BridgeActivity {
                         runOnUiThread(() -> {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                 try {
-                                    PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
                                     if (aspectWidth > 0 && aspectHeight > 0) {
                                         float r = (float) aspectWidth / (float) aspectHeight;
                                         if (r >= 0.41841f && r <= 2.39f) {
-                                            builder.setAspectRatio(new Rational(aspectWidth, aspectHeight));
+                                            lastPipAspectRatio = new Rational(aspectWidth, aspectHeight);
                                         } else {
-                                            builder.setAspectRatio(new Rational(16, 9));
+                                            lastPipAspectRatio = new Rational(16, 9);
                                         }
                                     } else {
-                                        builder.setAspectRatio(new Rational(16, 9));
+                                        lastPipAspectRatio = new Rational(16, 9);
                                     }
                                     if (right > left && bottom > top) {
-                                        builder.setSourceRectHint(new android.graphics.Rect(left, top, right, bottom));
+                                        lastPipSourceRect = new android.graphics.Rect(left, top, right, bottom);
                                     }
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                        builder.setAutoEnterEnabled(true);
+                                    if (pipAutoEnterEnabled && !_isInPip) {
+                                        setPictureInPictureParams(buildPipParams(true));
                                     }
-                                    List<RemoteAction> actions = buildPipActions();
-                                    if (!actions.isEmpty()) builder.setActions(actions);
-                                    setPictureInPictureParams(builder.build());
                                 } catch (Exception e) { e.printStackTrace(); }
                             }
                         });
@@ -200,13 +214,14 @@ public class MainActivity extends BridgeActivity {
                                     if (webView != null) {
                                         webView.evaluateJavascript(
                                             "document.body.classList.add('in-pip-mode');" +
-                                            "var vm=document.getElementById('videoModal');if(vm)vm.classList.add('active');" +
+                                            "var vm=document.getElementById('videoModal');" +
+                                            "if(vm){vm.classList.add('active');vm.classList.remove('modal-minimized');}" +
                                             "void 0;",
-                                            res -> webView.post(() -> {
+                                            res -> webView.postDelayed(() -> {
                                                 try {
                                                     enterPipWithControls();
                                                 } catch (Exception e) { e.printStackTrace(); }
-                                            })
+                                            }, 60)
                                         );
                                     }
                                 } catch (Exception e) { e.printStackTrace(); }
@@ -293,49 +308,53 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onUserLeaveHint() {
         super.onUserLeaveHint();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WebView webView = getBridge().getWebView();
-            if (webView != null) {
-                webView.evaluateJavascript(
-                    "(function(){ var m=document.getElementById('videoModal'); return m && m.classList.contains('active'); })()",
-                    res -> {
-                        if ("true".equals(res)) {
-                            // Step 1: add CSS class so WebView hides all UI except video
-                            webView.evaluateJavascript(
-                                "document.body.classList.add('in-pip-mode'); void 0;",
-                                r -> {
-                                    // Step 2: wait 200ms for browser reflow+repaint THEN enter PiP
-                                    // so Android captures the fullscreen video, not the modal layout
-                                    webView.postDelayed(() -> {
-                                        try {
-                                            enterPipWithControls();
-                                        } catch (Exception e) {
-                                            webView.evaluateJavascript("document.body.classList.remove('in-pip-mode'); void 0;", null);
-                                        }
-                                    }, 200);
-                                }
-                            );
-                        }
-                    }
-                );
+        // On Android 12+ (API 31+), setAutoEnterEnabled(true) handles leaving the app natively.
+        // On Android 8-11, we must enter PiP synchronously here before the Activity pauses.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            if (pipAutoEnterEnabled && !_isInPip) {
+                WebView webView = getBridge().getWebView();
+                if (webView != null) {
+                    webView.evaluateJavascript(
+                        "document.body.classList.add('in-pip-mode');" +
+                        "var vm=document.getElementById('videoModal');" +
+                        "if(vm)vm.classList.remove('modal-minimized');" +
+                        "void 0;",
+                        null
+                    );
+                }
+                enterPipWithControls();
             }
         }
     }
 
     // ── PiP helpers ──────────────────────────────────────────────────────────
+    private PictureInPictureParams buildPipParams(boolean includeSourceRect) {
+        PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
+        builder.setAspectRatio(lastPipAspectRatio != null ? lastPipAspectRatio : new Rational(16, 9));
+        if (includeSourceRect && lastPipSourceRect != null
+                && lastPipSourceRect.width() > 0 && lastPipSourceRect.height() > 0) {
+            builder.setSourceRectHint(lastPipSourceRect);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(pipAutoEnterEnabled);
+            builder.setSeamlessResizeEnabled(false);
+        }
+        List<RemoteAction> actions = buildPipActions();
+        if (!actions.isEmpty()) builder.setActions(actions);
+        return builder.build();
+    }
+
     private void enterPipWithControls() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         try {
-            PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
-            builder.setAspectRatio(new Rational(16, 9));
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                List<RemoteAction> actions = buildPipActions();
-                if (!actions.isEmpty()) builder.setActions(actions);
-            }
             registerPipReceiver();
-            enterPictureInPictureMode(builder.build());
+            enterPictureInPictureMode(buildPipParams(true));
         } catch (Exception e) {
             e.printStackTrace();
+            WebView webView = getBridge().getWebView();
+            if (webView != null) {
+                webView.evaluateJavascript("document.body.classList.remove('in-pip-mode'); void 0;", null);
+            }
         }
     }
 
@@ -391,7 +410,7 @@ public class MainActivity extends BridgeActivity {
                         "(function(){ var v=document.getElementById('videoPlayer'); if(v) v.currentTime=Math.max(0,v.currentTime-10); })()", null);
                 } else if (ACTION_PIP_FORWARD.equals(action)) {
                     wv.evaluateJavascript(
-                        "(function(){ var v=document.getElementById('videoPlayer'); if(v) v.currentTime=Math.min(v.duration,v.currentTime+10); })()", null);
+                        "(function(){ var v=document.getElementById('videoPlayer'); if(v){ var t=v.currentTime+10; v.currentTime=isFinite(v.duration)?Math.min(v.duration,t):t; } })()", null);
                 }
             }
         };
@@ -422,14 +441,18 @@ public class MainActivity extends BridgeActivity {
             registerPipReceiver();
             if (webView != null) {
                 webView.evaluateJavascript(
-                    "document.body.classList.add('in-pip-mode'); void 0;", null);
+                    "document.body.classList.add('in-pip-mode');" +
+                    "var vm=document.getElementById('videoModal');if(vm)vm.classList.remove('modal-minimized');" +
+                    "void 0;", null);
             }
         } else {
             // EXIT: restore UI
             unregisterPipReceiver();
             if (webView != null) {
                 webView.evaluateJavascript(
-                    "document.body.classList.remove('in-pip-mode'); void 0;", null);
+                    "document.body.classList.remove('in-pip-mode');" +
+                    "if(typeof window._updateAndroidPipBounds==='function')setTimeout(window._updateAndroidPipBounds,150);" +
+                    "void 0;", null);
             }
         }
     }
