@@ -7,21 +7,27 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.res.Configuration;
+import android.graphics.Color;
 import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
 import android.util.Rational;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.os.Bundle;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.webkit.WebChromeClient;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.widget.FrameLayout;
+import android.os.Bundle;
 import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,6 +45,11 @@ public class MainActivity extends BridgeActivity {
     private android.graphics.Rect lastPipSourceRect = null;
     private Rational lastPipAspectRatio = new Rational(16, 9);
 
+    // Custom fullscreen view state (fixes Capacitor's BridgeWebChromeClient killing video fullscreen)
+    private View customFullscreenView = null;
+    private WebChromeClient.CustomViewCallback customFullscreenCallback = null;
+    private boolean backWasEnabledBeforeFullscreen = false;
+
     private OnBackPressedCallback webViewBackCallback;
 
     @Override
@@ -47,10 +58,14 @@ public class MainActivity extends BridgeActivity {
 
         // Register our back callback with HIGHEST priority (registered first = highest)
         // When DISABLED → predictive back gesture shows the system animation
-        // When ENABLED  → we intercept and forward to JS
+        // When ENABLED  → we intercept and forward to JS (or exit native custom fullscreen)
         webViewBackCallback = new OnBackPressedCallback(false) {
             @Override
             public void handleOnBackPressed() {
+                if (customFullscreenView != null) {
+                    exitCustomFullscreenView();
+                    return;
+                }
                 WebView webView = getBridge().getWebView();
                 if (webView != null) {
                     webView.evaluateJavascript(
@@ -66,7 +81,7 @@ public class MainActivity extends BridgeActivity {
         };
         getOnBackPressedDispatcher().addCallback(this, webViewBackCallback);
 
-        // Setup JavaScript interfaces
+        // Setup JavaScript interfaces and proper HTML5 fullscreen WebChromeClient
         this.runOnUiThread(() -> {
             WebView webView = getBridge().getWebView();
             if (webView != null) {
@@ -74,11 +89,44 @@ public class MainActivity extends BridgeActivity {
                 settings.setMediaPlaybackRequiresUserGesture(false);
                 settings.setJavaScriptEnabled(true);
 
+                // Override Capacitor's default BridgeWebChromeClient which immediately calls
+                // callback.onCustomViewHidden() and causes black-video/audio-only bugs.
+                webView.setWebChromeClient(new BridgeWebChromeClient(getBridge()) {
+                    @Override
+                    public void onShowCustomView(View view, CustomViewCallback callback) {
+                        if (customFullscreenView != null) {
+                            callback.onCustomViewHidden();
+                            return;
+                        }
+                        customFullscreenView = view;
+                        customFullscreenCallback = callback;
+                        customFullscreenView.setBackgroundColor(Color.BLACK);
+
+                        FrameLayout rootContainer = (FrameLayout) getWindow().getDecorView();
+                        rootContainer.addView(
+                            customFullscreenView,
+                            new FrameLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                        );
+
+                        backWasEnabledBeforeFullscreen = webViewBackCallback.isEnabled();
+                        webViewBackCallback.setEnabled(true);
+                        hideSystemUI();
+                    }
+
+                    @Override
+                    public void onHideCustomView() {
+                        exitCustomFullscreenView();
+                    }
+                });
+
                 webView.addJavascriptInterface(new Object() {
 
                     @android.webkit.JavascriptInterface
                     public void setBackHandlerEnabled(boolean enabled) {
-                        runOnUiThread(() -> webViewBackCallback.setEnabled(enabled));
+                        runOnUiThread(() -> webViewBackCallback.setEnabled(enabled || customFullscreenView != null));
                     }
 
                     @android.webkit.JavascriptInterface
@@ -457,8 +505,57 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    private void exitCustomFullscreenView() {
+        runOnUiThread(() -> {
+            if (customFullscreenView == null) return;
+            try {
+                ViewGroup rootContainer = (ViewGroup) getWindow().getDecorView();
+                rootContainer.removeView(customFullscreenView);
+            } catch (Exception ignored) {}
+            customFullscreenView = null;
+            if (customFullscreenCallback != null) {
+                try { customFullscreenCallback.onCustomViewHidden(); } catch (Exception ignored) {}
+                customFullscreenCallback = null;
+            }
+            if (webViewBackCallback != null) {
+                webViewBackCallback.setEnabled(backWasEnabledBeforeFullscreen);
+            }
+            hideSystemUI();
+            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+            if (webView != null) {
+                webView.evaluateJavascript(
+                    "if(typeof window._syncNativeBackHandler==='function')window._syncNativeBackHandler();" +
+                    "if(typeof window._refreshVideoCompositor==='function')setTimeout(window._refreshVideoCompositor,60);" +
+                    "void 0;", null);
+            }
+        });
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        hideSystemUI();
+        if (_isInPip) return;
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView != null) {
+            boolean isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE;
+            // 150 ms: genug Zeit für den WebView-Layout-Reflow nach der Rotation,
+            // aber < 180 ms JS-Debounce → Java feuert zuerst; JS-Fallback überspringt via _lastOrientCallTs.
+            webView.postDelayed(() -> {
+                if (!isFinishing() && !isDestroyed()) {
+                    hideSystemUI();
+                    webView.evaluateJavascript(
+                        "if(typeof window._onAndroidOrientationChange==='function')window._onAndroidOrientationChange(" + isLandscape + "); void 0;",
+                        null
+                    );
+                }
+            }, 150);
+        }
+    }
+
     @Override
     public void onDestroy() {
+        exitCustomFullscreenView();
         unregisterPipReceiver();
         super.onDestroy();
     }

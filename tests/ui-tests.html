@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamHub — UI-Testumgebung</title>
+    <style>
+        /* ── Layout ─────────────────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0d0d0d;
+            color: #e0e0e0;
+            padding: 24px;
+            min-height: 100vh;
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 4px; color: #fff; }
+        .subtitle { font-size: 0.85rem; color: #888; margin-bottom: 24px; }
+
+        /* ── Test-Runner-Bereich ─────────────────────────────────────────── */
+        #run-btn {
+            background: #3b82f6; color: #fff; border: none;
+            padding: 10px 24px; border-radius: 8px; font-size: 1rem;
+            cursor: pointer; margin-bottom: 20px; transition: background .2s;
+        }
+        #run-btn:hover { background: #2563eb; }
+        #run-btn:disabled { background: #444; cursor: default; }
+
+        #summary {
+            font-size: 0.95rem; margin-bottom: 16px; padding: 10px 16px;
+            border-radius: 8px; display: none;
+        }
+        #summary.ok  { background: #052e16; border: 1px solid #15803d; color: #4ade80; }
+        #summary.err { background: #2d0909; border: 1px solid #b91c1c; color: #f87171; }
+
+        /* ── Gruppen ─────────────────────────────────────────────────────── */
+        .group { margin-bottom: 24px; }
+        .group-title {
+            font-size: 1rem; font-weight: 600; color: #93c5fd;
+            margin-bottom: 8px; border-bottom: 1px solid #1e3a5f;
+            padding-bottom: 4px;
+        }
+
+        /* ── Einzelne Test-Zeilen ────────────────────────────────────────── */
+        .test-row {
+            display: flex; align-items: flex-start; gap: 10px;
+            padding: 6px 10px; border-radius: 6px; font-size: 0.88rem;
+            border: 1px solid transparent; margin-bottom: 2px;
+        }
+        .test-row.pass { background: #0a1f0e; border-color: #15803d; }
+        .test-row.fail { background: #1f0a0a; border-color: #b91c1c; }
+        .test-row.skip { background: #191910; border-color: #713f12; }
+        .badge { flex-shrink: 0; font-size: 1rem; }
+        .test-name { flex: 1; }
+        .test-reason { font-size: 0.8rem; color: #f87171; margin-top: 2px; }
+
+        /* ── Interaktive Testbereiche ────────────────────────────────────── */
+        .demo-section {
+            margin-top: 32px; padding: 20px;
+            background: #141414; border-radius: 12px; border: 1px solid #222;
+        }
+        .demo-section h2 { font-size: 1.1rem; color: #c084fc; margin-bottom: 12px; }
+        .demo-section p  { font-size: 0.85rem; color: #aaa; margin-bottom: 12px; }
+
+        /* Scroll-vs-Tap Test */
+        #scroll-container {
+            height: 180px; overflow-y: auto;
+            background: #0d0d0d; border: 1px solid #333; border-radius: 8px;
+        }
+        .scroll-item {
+            padding: 14px 18px; border-bottom: 1px solid #1a1a1a;
+            font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center;
+        }
+        .scroll-item .tap-btn {
+            background: #1e40af; color: #fff; border: none; border-radius: 6px;
+            padding: 6px 14px; font-size: 0.82rem; cursor: pointer;
+        }
+        #scroll-tap-log {
+            margin-top: 10px; font-size: 0.82rem; color: #6ee7b7;
+            min-height: 20px; font-family: monospace;
+        }
+
+        /* Profile-Mini-Demo */
+        #profile-demo-wrap {
+            display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+        }
+        .profile-mini {
+            background: #1a1a2e; border: 1px solid #334; border-radius: 10px;
+            padding: 10px 14px; cursor: pointer; font-size: 0.85rem;
+            transition: border-color .2s, background .2s;
+        }
+        .profile-mini.active { border-color: #3b82f6; background: #172554; }
+        #profile-demo-log { font-size: 0.82rem; color: #6ee7b7; font-family: monospace; }
+    </style>
+</head>
+<body>
+
+<h1>🧪 StreamHub — UI-Testumgebung</h1>
+<p class="subtitle">Automatisierte Logiktests + interaktive Demos im Browser. Öffne diese Datei direkt im Browser (kein Server nötig).</p>
+
+<button id="run-btn">▶ Tests ausführen</button>
+<div id="summary"></div>
+<div id="results"></div>
+
+<!-- ── Interaktiver Demo: Scroll-vs-Tap ──────────────────────────────────── -->
+<div class="demo-section">
+    <h2>🖱 Demo: Scroll-vs-Tap-Schutz (bindSafeTap)</h2>
+    <p>Scrolle in der Liste, ohne einen "Tippen"-Log-Eintrag auszulösen. Ein echter Tap auf den Button soll trotzdem funktionieren.</p>
+    <div id="scroll-container"></div>
+    <div id="scroll-tap-log">— warte auf Interaktion —</div>
+</div>
+
+<!-- ── Interaktiver Demo: Profil-Auswahl ─────────────────────────────────── -->
+<div class="demo-section">
+    <h2>👤 Demo: Profil-Auswahl</h2>
+    <p>Klick / Tap auf ein Profil wählt es aus (simuliert <code>switchProfile</code>).</p>
+    <div id="profile-demo-wrap">
+        <div class="profile-mini" data-pid="1">🎬 Max</div>
+        <div class="profile-mini" data-pid="2">🧒 Kind</div>
+        <div class="profile-mini" data-pid="3">🎵 Sarah</div>
+    </div>
+    <div id="profile-demo-log">— kein Profil aktiv —</div>
+</div>
+
+<!-- ── Lade Module aus dem js/-Ordner ────────────────────────────────────── -->
+<script>
+// Lokaler localStorage-Mock (wird durch echtes window.localStorage ersetzt)
+// — im Browser ist window.localStorage schon vorhanden; kein Mock nötig.
+</script>
+<script src="../js/config.js"></script>
+<script src="../js/state.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/storage.js"></script>
+
+<script>
+/* =============================================================================
+   Test-Framework (Mini)
+   ============================================================================= */
+const _groups  = [];
+let _curGroup  = null;
+
+function group(title) {
+    _curGroup = { title, tests: [] };
+    _groups.push(_curGroup);
+}
+
+function test(name, fn) {
+    try {
+        fn();
+        _curGroup.tests.push({ name, status: 'pass' });
+    } catch (e) {
+        _curGroup.tests.push({ name, status: 'fail', reason: String(e.message || e) });
+    }
+}
+
+function skip(name, reason) {
+    _curGroup.tests.push({ name, status: 'skip', reason });
+}
+
+/** Wirft Error wenn Bedingung falsch */
+function assert(cond, msg) {
+    if (!cond) throw new Error(msg || 'Assertion fehlgeschlagen');
+}
+function assertEqual(a, b, msg) {
+    if (a !== b) throw new Error((msg || '') + ` → erwartet ${JSON.stringify(b)}, erhalten ${JSON.stringify(a)}`);
+}
+
+/* =============================================================================
+   Test-Definitionen
+   ============================================================================= */
+
+// ── Gruppe 1: getVideoProgressKey ───────────────────────────────────────────
+group('getVideoProgressKey (storage.js)');
+
+test('null → leerer String', () => {
+    assertEqual(getVideoProgressKey(null), '');
+});
+test('_uid hat höchste Priorität', () => {
+    assertEqual(getVideoProgressKey({ _uid: 'u1', id: '99' }), 'u1');
+});
+test('id → "id_<val>"', () => {
+    assertEqual(getVideoProgressKey({ id: '42' }), 'id_42');
+});
+test('url_video_hd als URL-Fallback', () => {
+    assertEqual(getVideoProgressKey({ url_video_hd: 'https://x.com/v.mp4' }), 'https://x.com/v.mp4');
+});
+test('Titel+Channel als String-Fallback', () => {
+    const k = getVideoProgressKey({ title: 'Foo', channel: 'ARD', timestamp: '2024' });
+    assert(typeof k === 'string' && k.includes('Foo'), 'Enthält Titel');
+});
+
+// ── Gruppe 2: saveVideoProgress / getVideoProgress ───────────────────────────
+group('saveVideoProgress / getVideoProgress Roundtrip');
+
+test('Unbekannte URL → null', () => {
+    assert(getVideoProgress('http://nope.com/x.mp4') === null);
+});
+test('Speichern und Lesen', () => {
+    const url = 'http://test.streamhub.de/video.mp4';
+    saveVideoProgress(url, 60, 120);
+    const p = getVideoProgress(url);
+    assert(p !== null, 'Eintrag nicht gefunden');
+    assertEqual(p.currentTime, 60);
+    assertEqual(p.duration, 120);
+    assertEqual(p.percent, 50);
+    assert(typeof p.timestamp === 'number', 'timestamp fehlt');
+});
+test('Update: percent == 85 (gesehen-Schwelle)', () => {
+    const url = 'http://test.streamhub.de/video.mp4';
+    saveVideoProgress(url, 102, 120);
+    assertEqual(getVideoProgress(url).percent, 85);
+});
+
+// ── Gruppe 3: removeHistoryItem ──────────────────────────────────────────────
+group('removeHistoryItem & removeMultipleHistoryItems');
+
+(function () {
+    const item1 = { _uid: 'uid-1', title: 'A', watchedAt: Date.now() };
+    const item2 = { _uid: 'uid-2', title: 'B', watchedAt: Date.now() };
+    const item3 = { _uid: 'uid-3', title: 'C', watchedAt: Date.now() };
+
+    test('Seed 3 Einträge', () => {
+        saveRecentlyWatched([item1, item2, item3]);
+        assertEqual(getRecentlyWatched().length, 3);
+    });
+    test('Einzellöschung via Objekt', () => {
+        removeHistoryItem(item2);
+        const r = getRecentlyWatched();
+        assertEqual(r.length, 2);
+        assert(!r.some(e => e._uid === 'uid-2'));
+    });
+    test('Einzellöschung via String-Key', () => {
+        removeHistoryItem('uid-3');
+        assertEqual(getRecentlyWatched().length, 1);
+    });
+    test('removeMultipleHistoryItems', () => {
+        saveRecentlyWatched([item1, item2, item3]);
+        const { updated, removedCount } = removeMultipleHistoryItems(['uid-1', 'uid-3']);
+        assertEqual(removedCount, 2);
+        assertEqual(updated.length, 1);
+        assertEqual(updated[0]._uid, 'uid-2');
+    });
+    test('Leere Auswahl löscht nichts', () => {
+        saveRecentlyWatched([item1, item2]);
+        assertEqual(removeMultipleHistoryItems([]).removedCount, 0);
+    });
+})();
+
+// ── Gruppe 4: filterKidsSafe ─────────────────────────────────────────────────
+group('filterKidsSafe (Kindersicherung)');
+
+test('Kein Profil: alles durch', () => {
+    // Kein getActiveProfile vorhanden → durchlassen
+    const backup = window.getActiveProfile;
+    window.getActiveProfile = undefined;
+    const r = filterKidsSafe([{ title: 'Thriller' }]);
+    window.getActiveProfile = backup;
+    assertEqual(r.length, 1);
+});
+test('Erwachsenenprofil: kein Filter', () => {
+    const backup = window.getActiveProfile;
+    window.getActiveProfile = () => ({ name: 'Max', isKids: false });
+    const r = filterKidsSafe([{ title: 'Tatort' }, { title: 'SpongeBob' }]);
+    window.getActiveProfile = backup;
+    assertEqual(r.length, 2);
+});
+test('Kinderprofil: Horror & Thriller geblockt', () => {
+    const backup = window.getActiveProfile;
+    window.getActiveProfile = () => ({ name: 'Kind', isKids: true });
+    const items = [
+        { title: 'SpongeBob',    topic: 'Kids', description: '' },
+        { title: 'Thriller-Nacht', topic: '', description: '' },
+        { title: 'Horror-Film',    topic: '', description: '' },
+        { title: 'Pumuckl',       topic: 'Kinder', description: '' },
+    ];
+    const r = filterKidsSafe(items);
+    window.getActiveProfile = backup;
+    assertEqual(r.length, 2, 'Thriller und Horror müssen geblockt werden');
+});
+
+// ── Gruppe 5: Progress-Trimming ──────────────────────────────────────────────
+group('saveVideoProgress: Trimming auf 50 Einträge');
+
+test('50+ Einträge: ältester wird entfernt', () => {
+    for (let i = 0; i < 60; i++) {
+        saveVideoProgress(`http://trim-test.com/v${i}.mp4`, i, 120);
+    }
+    assert(getVideoProgress('http://trim-test.com/v59.mp4') !== null, 'Neuester vorhanden');
+    assert(getVideoProgress('http://trim-test.com/v0.mp4')  === null, 'Ältester entfernt');
+});
+
+/* =============================================================================
+   Test-Runner + Ergebnis-Rendering
+   ============================================================================= */
+function renderResults() {
+    const container = document.getElementById('results');
+    const summary   = document.getElementById('summary');
+    container.innerHTML = '';
+
+    let total = 0, totalPass = 0, totalFail = 0, totalSkip = 0;
+
+    for (const g of _groups) {
+        const gEl = document.createElement('div');
+        gEl.className = 'group';
+        const titleEl = document.createElement('div');
+        titleEl.className = 'group-title';
+        titleEl.textContent = g.title;
+        gEl.appendChild(titleEl);
+
+        for (const t of g.tests) {
+            total++;
+            if (t.status === 'pass')      totalPass++;
+            else if (t.status === 'fail') totalFail++;
+            else                          totalSkip++;
+
+            const row = document.createElement('div');
+            row.className = `test-row ${t.status}`;
+
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = t.status === 'pass' ? '✔' : t.status === 'fail' ? '✘' : '─';
+
+            const nameEl = document.createElement('div');
+            nameEl.className = 'test-name';
+            nameEl.textContent = t.name;
+
+            if (t.status === 'fail' && t.reason) {
+                const reason = document.createElement('div');
+                reason.className = 'test-reason';
+                reason.textContent = '→ ' + t.reason;
+                nameEl.appendChild(reason);
+            }
+
+            row.appendChild(badge);
+            row.appendChild(nameEl);
+            gEl.appendChild(row);
+        }
+
+        container.appendChild(gEl);
+    }
+
+    summary.style.display = 'block';
+    if (totalFail === 0) {
+        summary.className = 'ok';
+        summary.textContent = `✔ Alle ${totalPass} Tests bestanden!`;
+    } else {
+        summary.className = 'err';
+        summary.textContent = `✘ ${totalFail} von ${total} Tests fehlgeschlagen — ${totalPass} bestanden, ${totalSkip} übersprungen`;
+    }
+}
+
+document.getElementById('run-btn').addEventListener('click', () => {
+    // Gruppen zurücksetzen und neu ausführen
+    _groups.length = 0;
+    renderResults();
+    // Tests sind bereits definiert und laufen sofort beim Laden;
+    // hier nochmal ausführen würde doppelt zählen → daher rendern wir nur.
+    // (Tests wurden beim Skript-Load ausgeführt.)
+    renderResults();
+});
+
+// Initial rendern
+renderResults();
+
+/* =============================================================================
+   Demo: Scroll-vs-Tap
+   ============================================================================= */
+const scrollContainer = document.getElementById('scroll-container');
+const scrollLog       = document.getElementById('scroll-tap-log');
+
+for (let i = 1; i <= 12; i++) {
+    const item = document.createElement('div');
+    item.className = 'scroll-item';
+    item.innerHTML = `<span>Video ${i}: Beispieltitel</span>`;
+
+    const btn = document.createElement('button');
+    btn.className = 'tap-btn';
+    btn.textContent = 'Später ansehen';
+
+    // bindSafeTap statt onclick — verhindert Fehl-Taps beim Scrollen
+    if (typeof bindSafeTap === 'function') {
+        bindSafeTap(btn, () => {
+            scrollLog.textContent = `✔ Echter Tap: "Später ansehen" für Video ${i} (${new Date().toLocaleTimeString()})`;
+        }, { stopPropagation: true });
+    } else {
+        btn.onclick = () => {
+            scrollLog.textContent = `✔ Click: Video ${i} (bindSafeTap nicht verfügbar)`;
+        };
+    }
+
+    item.appendChild(btn);
+    scrollContainer.appendChild(item);
+}
+
+/* =============================================================================
+   Demo: Profil-Auswahl
+   ============================================================================= */
+const profileLog = document.getElementById('profile-demo-log');
+document.querySelectorAll('.profile-mini').forEach(el => {
+    if (typeof bindSafeTap === 'function') {
+        bindSafeTap(el, () => {
+            document.querySelectorAll('.profile-mini').forEach(p => p.classList.remove('active'));
+            el.classList.add('active');
+            profileLog.textContent = `✔ Profil "${el.textContent.trim()}" gewählt (ID: ${el.dataset.pid})`;
+        });
+    } else {
+        el.onclick = () => {
+            document.querySelectorAll('.profile-mini').forEach(p => p.classList.remove('active'));
+            el.classList.add('active');
+            profileLog.textContent = `✔ Profil "${el.textContent.trim()}" gewählt (ID: ${el.dataset.pid})`;
+        };
+    }
+});
+</script>
+</body>
+</html>

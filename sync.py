@@ -9,7 +9,7 @@ def sync_files():
     
     os.makedirs(www_dir, exist_ok=True)
     
-    files_to_copy = ['index.html', 'renderer.js', 'style.css']
+    files_to_copy = ['index.html', 'style.css']
     
     print("🔄 Kopiere Quelldateien nach www/...")
     for filename in files_to_copy:
@@ -21,13 +21,20 @@ def sync_files():
         else:
             print(f"  ⚠️ Warnung: {filename} existiert nicht in Root!")
 
-    vendor_src = os.path.join(base_dir, 'vendor')
-    vendor_dst = os.path.join(www_dir, 'vendor')
-    if os.path.isdir(vendor_src):
-        if os.path.exists(vendor_dst):
-            shutil.rmtree(vendor_dst)
-        shutil.copytree(vendor_src, vendor_dst)
-        print("  ✓ vendor/ -> www/vendor/")
+    # Veraltete monolithische www/renderer.js entfernen, da jetzt js/ genutzt wird
+    stale_renderer = os.path.join(www_dir, 'renderer.js')
+    if os.path.exists(stale_renderer):
+        os.remove(stale_renderer)
+        print("  🧹 Veraltete www/renderer.js entfernt")
+
+    for folder_name in ('js', 'vendor'):
+        folder_src = os.path.join(base_dir, folder_name)
+        folder_dst = os.path.join(www_dir, folder_name)
+        if os.path.isdir(folder_src):
+            if os.path.exists(folder_dst):
+                shutil.rmtree(folder_dst)
+            shutil.copytree(folder_src, folder_dst)
+            print(f"  ✓ {folder_name}/ -> www/{folder_name}/")
 
     print("\n📱 Führe 'npx cap sync android' aus...")
     env = os.environ.copy()
